@@ -19,6 +19,9 @@ engine = create_async_engine(
     pool_timeout=30,         # seconds to wait for a connection
     pool_recycle=1800,       # recycle connections every 30 min
     pool_pre_ping=True,      # validate connections before use
+    connect_args={
+        "ssl": "require",    # SSL required for Neon DB
+    }
 )
 
 # Async session factory

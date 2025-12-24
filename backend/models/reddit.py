@@ -13,7 +13,7 @@ class RedditPost(Base):
     author = Column(String(50))
     score = Column(Integer, default=0)
     num_comments = Column(Integer, default=0)
-    tickers = Column(ARRAY(String), default=[])
+    tickers = Column(ARRAY(String), server_default='{}')
     sentiment_score = Column(Float, default=0.0)
     created_at = Column(DateTime(timezone=True), nullable=False)
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
