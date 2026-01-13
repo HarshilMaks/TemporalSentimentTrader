@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, text
+from sqlalchemy import select, desc, text, func
 from backend.models.reddit import RedditPost
 from backend.database.config import get_db
 from backend.api.schemas.posts import PostListResponse, PostByTickerResponse, TrendingResponse
@@ -87,4 +87,48 @@ async def get_trending_tickers(
     
     trending = [{"ticker": row[0], "mentions": row[1]} for row in result]
     return TrendingResponse(trending=trending)  # type: ignore
+
+
+@router.get("/sentiment/{ticker}")
+async def get_ticker_sentiment(
+    ticker: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get aggregated sentiment for a specific ticker"""
+    result = await db.execute(
+        select(
+            func.avg(RedditPost.sentiment_score).label('avg_sentiment'),
+            func.count(RedditPost.id).label('post_count'),
+            func.sum(RedditPost.score).label('total_engagement')
+        ).where(RedditPost.tickers.contains([ticker.upper()]))
+    )
+    
+    row = result.first()
+    
+    if not row or row.post_count == 0:
+        return {
+            "ticker": ticker.upper(),
+            "sentiment": "No data",
+            "avg_score": 0.0,
+            "post_count": 0,
+            "total_engagement": 0
+        }
+    
+    avg_sentiment = float(row.avg_sentiment) if row.avg_sentiment else 0.0
+    
+    # Determine sentiment label
+    if avg_sentiment >= 0.05:
+        label = "bullish"
+    elif avg_sentiment <= -0.05:
+        label = "bearish"
+    else:
+        label = "neutral"
+    
+    return {
+        "ticker": ticker.upper(),
+        "sentiment": label,
+        "avg_score": round(avg_sentiment, 3),
+        "post_count": row.post_count,
+        "total_engagement": row.total_engagement or 0
+    }
     

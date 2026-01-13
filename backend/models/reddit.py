@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ARRAY, Index, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, ARRAY, Index, Float, Numeric
 from sqlalchemy.sql import func
 from backend.database.config import Base
 
@@ -14,7 +14,7 @@ class RedditPost(Base):
     score = Column(Integer, default=0)
     num_comments = Column(Integer, default=0)
     tickers = Column(ARRAY(String), server_default='{}')
-    sentiment_score = Column(Float, default=0.0)
+    sentiment_score = Column(Numeric(precision=5, scale=4), default=0.0)
     created_at = Column(DateTime(timezone=True), nullable=False)
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
     url = Column(String(500))

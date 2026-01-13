@@ -107,6 +107,17 @@ def get_sentiment_analyzer() -> SentimentAnalyzer:
 
 
 def analyze_sentiment(text: str) -> float:
-    """Convenience function to analyze text sentiment"""
+    """
+    Convenience function to analyze text sentiment.
+    
+    Args:
+        text: Post title + body text to analyze
+        
+    Returns:
+        float: Compound sentiment score from -1 to +1
+    """
+    if not text or not text.strip():
+        return 0.0
+    
     analyzer = get_sentiment_analyzer()
     return analyzer.analyze(text)
