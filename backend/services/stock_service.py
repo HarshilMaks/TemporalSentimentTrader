@@ -1,3 +1,4 @@
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.models.stock import StockPrice
@@ -5,7 +6,6 @@ from backend.scrapers.stock_scraper import StockScraper
 from backend.utils.logger import logger
 from datetime import datetime
 from typing import List, Dict
-
 
 class StockService:
     """Service layer for stock price data management"""
@@ -87,7 +87,7 @@ class StockService:
         period: str = "3mo"
     ) -> Dict[str, Dict]:
         """
-        Fetch and save data for multiple tickers in parallel.
+        Fetch and save data for multiple tickers using hybrid approach.
         
         Args:
             tickers: List of stock symbols
@@ -96,12 +96,62 @@ class StockService:
             
         Returns:
             Dictionary mapping ticker to stats
+            
+        Hybrid Approach:
+        Phase 1: Fetch all tickers in parallel (fast network I/O)
+        Phase 2: Save to DB sequentially (safe transactions)
         """
+        logger.info(f"Fetching {len(tickers)} tickers in parallel...")
+        
+        # ⚡ PHASE 1: PARALLEL FETCH (fast)
+        all_data = await self.scraper.fetch_multiple(tickers, period)
+        
+        # 🔒 PHASE 2: SEQUENTIAL SAVE (safe)
         results = {}
         
         for ticker in tickers:
-            result = await self.fetch_and_save_stock_data(ticker, db, period)
-            results[ticker] = result
+            prices = all_data.get(ticker, [])
+            
+            if not prices:
+                logger.warning(f"No data fetched for {ticker}")
+                results[ticker] = {"saved": 0, "skipped": 0, "errors": 1}
+                continue
+            
+            saved_count = 0
+            skipped_count = 0
+            
+            try:
+                for price_data in prices:
+                    # Check if record already exists
+                    existing = await db.execute(
+                        select(StockPrice).where(
+                            StockPrice.ticker == price_data['ticker'],
+                            StockPrice.date == price_data['date']
+                        )
+                    )
+                    if existing.scalar_one_or_none():
+                        skipped_count += 1
+                        continue
+                    
+                    # Add to session
+                    stock_price = StockPrice(**price_data)
+                    db.add(stock_price)
+                    saved_count += 1
+                
+                # Commit per ticker (transaction boundary)
+                await db.commit()
+                logger.info(f"{ticker}: Saved {saved_count}, Skipped {skipped_count}")
+                
+                results[ticker] = {
+                    "saved": saved_count,
+                    "skipped": skipped_count,
+                    "errors": 0
+                }
+                
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Failed to save {ticker}: {e}")
+                results[ticker] = {"saved": 0, "skipped": 0, "errors": 1}
         
         return results
     

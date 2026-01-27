@@ -7,7 +7,7 @@ log_dir = Path(__file__).resolve().parents[2] / 'logs'
 log_dir.mkdir(exist_ok=True)
 
 
-bbdef get_logger(name: str) -> logging.Logger:
+def get_logger(name: str) -> logging.Logger:
     """
     Get or create a logger with consistent configuration
     
@@ -45,3 +45,7 @@ bbdef get_logger(name: str) -> logging.Logger:
         logger.addHandler(file_handler)
     
     return logger
+
+
+# Create a default logger instance for convenience
+logger = get_logger('tft_trader')

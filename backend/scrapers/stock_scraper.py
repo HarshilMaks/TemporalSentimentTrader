@@ -24,9 +24,7 @@ class StockScraper:
         return await loop.run_in_executor(
             None, 
             self._fetch_sync, 
-            ticker, 
-            period, 
-            calculate_indicators
+            ticker, period, calculate_indicators
         )
     
     def _fetch_sync(self, ticker: str, period: str, calc_indicators: bool) -> List[Dict]:

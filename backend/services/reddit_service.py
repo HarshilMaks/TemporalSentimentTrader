@@ -1,10 +1,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, Literal
+import asyncio
 from backend.models.reddit import RedditPost
 from backend.scrapers.mock_reddit import MockRedditScraper as RedditScraper, PostType
 from backend.utils.ticker_extractor import extract_tickers
 from backend.utils.sentiment import analyze_sentiment
+from backend.utils.logger import logger
 
 
 class RedditService:
@@ -29,7 +31,7 @@ class RedditService:
         time_filter: str = 'day'
     ) -> dict[str, int | dict[str, dict[str, int]]]:
         """
-        Scrape Reddit posts from multiple subreddits and save to database with sentiment analysis.
+        Scrape Reddit posts from multiple subreddits using hybrid approach.
         
         Args:
             db: Database session
@@ -40,10 +42,38 @@ class RedditService:
         
         Returns:
             Dictionary with stats: saved, skipped, failed, by_subreddit
+            
+        Hybrid Approach:
+        Phase 1: Scrape all subreddits in parallel (fast network I/O)
+        Phase 2: Process and save to DB sequentially (safe transactions)
         """
         if subreddits is None:
             subreddits = self.DEFAULT_SUBREDDITS
         
+        logger.info(f"Scraping {len(subreddits)} subreddits in parallel...")
+        
+        # ⚡ PHASE 1: PARALLEL SCRAPING (fast)
+        scrape_tasks = [
+            asyncio.to_thread(
+                self.scraper.scrape_posts,
+                subreddit, limit, post_type, time_filter
+            )
+            for subreddit in subreddits
+        ]
+        
+        scrape_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
+        
+        # Map results to subreddits
+        all_posts = {}
+        for subreddit, result in zip(subreddits, scrape_results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to scrape r/{subreddit}: {result}")
+                all_posts[subreddit] = []
+            else:
+                all_posts[subreddit] = result
+                logger.info(f"Fetched {len(result)} posts from r/{subreddit}")
+        
+        # 🔒 PHASE 2: SEQUENTIAL PROCESSING & SAVING (safe)
         total_saved = 0
         total_skipped = 0
         total_failed = 0
@@ -51,9 +81,7 @@ class RedditService:
         subreddit_stats = {}
         
         for subreddit in subreddits:
-            print(f"Scraping r/{subreddit} ({post_type} posts)...")
-            
-            posts = self.scraper.scrape_posts(subreddit, limit, post_type, time_filter)
+            posts = all_posts.get(subreddit, [])
             saved_count = 0
             skipped_count = 0
             failed_count = 0
@@ -103,6 +131,14 @@ class RedditService:
                     failed_count += 1
                     continue
             
+            # Commit per subreddit (transaction boundary)
+            try:
+                await db.commit()
+                logger.info(f"r/{subreddit}: {saved_count} saved, {skipped_count} skipped, {failed_count} failed")
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Failed to commit r/{subreddit}: {e}")
+            
             # Track stats per subreddit
             subreddit_stats[subreddit] = {
                 'saved': saved_count,
@@ -115,11 +151,6 @@ class RedditService:
             total_skipped += skipped_count
             total_failed += failed_count
             total_fetched += len(posts)
-            
-            print(f"r/{subreddit}: {saved_count} saved, {skipped_count} skipped, {failed_count} failed")
-        
-        # Commit all at once (transaction)
-        await db.commit()
         
         return {
             'saved': total_saved,
