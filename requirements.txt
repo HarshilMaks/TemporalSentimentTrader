@@ -1,16 +1,52 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-alembic
-psycopg2-binary
-asyncpg
-python-dotenv
-pydantic-settings
-praw
-pandas
-vaderSentiment
-APScheduler
-yfinance
-pandas-ta
-redis
-celery
+# Runtime dependencies (pin to known working upper-bounds for Python >=3.12)
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+sqlalchemy==2.0.25
+alembic==1.13.1
+# Using asyncpg for async SQLAlchemy engine
+asyncpg==0.29.0
+
+# Settings and env
+pydantic==2.6.4
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+
+# Auth and form handling (used by API middleware/auth)
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.9
+
+# Data and ML stack (align with pyproject)
+numpy==1.26.4
+pandas==2.2.1
+scikit-learn==1.4.1.post1
+lightgbm==4.3.0
+xgboost==2.0.3
+# PyTorch stack versions that work together on CPU; CUDA users can install appropriate wheels
+torch==2.2.1
+pytorch-forecasting==1.0.0
+
+# Scraping and HTTP
+requests==2.31.0
+beautifulsoup4==4.12.3
+praw==7.7.1
+
+# Task queue / scheduling / caching
+redis==5.0.1
+celery==5.3.6
+APScheduler==3.10.4
+
+# NLP / Sentiment
+vadersentiment==3.3.2
+textblob==0.17.1
+
+# Market data and TA
+yfinance==0.2.36
+pandas-ta==0.3.14b0
+
+# Dev/test tools (install optionally)
+# pytest==8.0.2
+# pytest-asyncio==0.23.5
+# httpx==0.27.0
+# black==24.2.0
+# ruff==0.2.2

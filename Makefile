@@ -48,9 +48,6 @@ install-backend:
 install-frontend:
 	cd frontend && npm install
 
-dev:
-	uv pip install -r requirements-dev.txt
-
 sync:
 	uv sync
 
@@ -86,29 +83,29 @@ frontend:
 	cd frontend && npm run dev
 
 # Docker
-docker-build:
+docker build:
 	docker-compose build
 
-docker-up:
+docker up:
 	docker-compose up -d
 
-docker-down:
+docker down:
 	docker-compose down
 
-docker-logs:
+docker logs:
 	docker-compose logs -f
 
 # Data Collection & ML
-scrape-reddit:
+scrape reddit:
 	uv run python scripts/scrape_reddit.py
 
-scrape-scheduled:
+scrape scheduled:
 	uv run python scripts/scheduled_scraper.py
 
-scrape-once:
+scrape once:
 	uv run python scripts/scheduled_scraper.py --once
 
-train-models:
+train models:
 	uv run python scripts/train_models.py
 
 backtest:
