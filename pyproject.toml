@@ -1,7 +1,7 @@
 [project]
-name = "tft-trader"
+name = "temporal-sentiment-trader"
 version = "0.1.0"
-description = "TFT Stock Trading Platform with ML Predictions"
+description = "Temporal Sentiment Trading Platform with TFT Ensemble ML Models"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110.0",

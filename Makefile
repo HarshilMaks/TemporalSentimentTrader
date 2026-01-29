@@ -16,10 +16,11 @@ help:
 	@echo "  make migrate-down    - Rollback last migration"
 	@echo ""
 	@echo "Run:"
-	@echo "  make run-backend     - Start FastAPI backend server"
-	@echo "  make run-frontend    - Start Next.js frontend"
+	@echo "  make app             - Start FastAPI backend server"
+	@echo "  make front           - Start Next.js frontend"
 	@echo ""
 	@echo "Docker:"
+	@echo "  make docker-build    - Build docker images"
 	@echo "  make docker-up       - Start docker containers"
 	@echo "  make docker-down     - Stop docker containers"
 	@echo "  make docker-logs     - View docker logs"
@@ -30,7 +31,11 @@ help:
 	@echo "  make scrape-once     - Test scraper (single run)"
 	@echo "  make train-models    - Train ML models"
 	@echo "  make backtest        - Run backtesting"
-	@echo "  make backtest        - Run backtesting"
+	@echo ""
+	@echo "Celery (Background Tasks):"
+	@echo "  make worker          - Start Celery worker"
+	@echo "  make beat            - Start Celery beat scheduler"
+	@echo "  make celery-monitor  - Monitor Celery tasks (Flower)"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make test            - Run tests"
@@ -40,12 +45,12 @@ help:
 	@echo "  make shell           - Open Python shell with models loaded"
 
 # Installation
-install: install-backend install-frontend
+install: install-app install-front
 
-install-backend:
+install-app:
 	uv pip install -r requirements.txt
 
-install-frontend:
+install-front:
 	cd frontend && npm install
 
 sync:
@@ -79,37 +84,50 @@ app:
 	fi
 	uv run uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8000
 
-frontend:
+front:
 	cd frontend && npm run dev
 
 # Docker
-docker build:
+docker-build:
 	docker-compose build
 
-docker up:
+docker-up:
 	docker-compose up -d
 
-docker down:
+docker-down:
 	docker-compose down
 
-docker logs:
+docker-logs:
 	docker-compose logs -f
 
 # Data Collection & ML
-scrape reddit:
+scrape-reddit:
 	uv run python scripts/scrape_reddit.py
 
-scrape scheduled:
+scrape-scheduled:
 	uv run python scripts/scheduled_scraper.py
 
-scrape once:
+scrape-once:
 	uv run python scripts/scheduled_scraper.py --once
 
-train models:
+train-models:
 	uv run python scripts/train_models.py
 
 backtest:
 	uv run python scripts/backtest.py
+
+# Celery Background Tasks
+worker:
+	@echo "🚀 Starting Celery worker..."
+	@uv run celery -A backend.celery_app worker --loglevel=info --concurrency=2 --queues=scraping,ml
+
+beat:
+	@echo "⏰ Starting Celery beat scheduler..."
+	@uv run celery -A backend.celery_app beat --loglevel=info
+
+celery monitor:
+	@echo "🌸 Starting Flower monitoring UI (http://localhost:5555)..."
+	@uv run celery -A backend.celery_app flower --port=5555
 
 # Testing
 test:

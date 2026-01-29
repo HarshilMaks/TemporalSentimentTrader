@@ -1,8 +1,8 @@
-# TFT Trader
+# Temporal Sentiment Trader
 
-**Algorithmic Swing Trading Platform with ML-Driven Sentiment Analysis**
+**Algorithmic Swing Trading Platform with TFT Ensemble ML & Sentiment Analysis**
 
-TFT Trader is a production-grade, full-stack trading system that combines Reddit sentiment analysis with technical momentum indicators to generate algorithmic swing trading signals. The platform uses an ensemble ML approach (LSTM, XGBoost, LightGBM) with strict risk management to target 60-65% win rates on 3-7 day trades.
+Temporal Sentiment Trader is a production-grade, full-stack trading system that combines Reddit sentiment analysis with temporal fusion transformer (TFT) ensemble models to generate algorithmic swing trading signals. The platform uses a multi-model ensemble (TFT, LSTM, XGBoost, LightGBM) with strict risk management to target 60-65% win rates on 3-7 day trades.
 
 **Project Status:** Active Development | Week 2 of 12  
 **Strategy:** Swing + Momentum Trading  
@@ -17,13 +17,13 @@ TFT Trader is a production-grade, full-stack trading system that combines Reddit
 Capture short-term momentum opportunities by combining:
 - **Reddit sentiment analysis** (early detection of retail investor momentum)
 - **Technical indicators** (RSI, MACD, Bollinger Bands, moving averages)
-- **Ensemble ML predictions** (multiple models voting for robustness)
+- **Temporal Fusion Transformer ensemble** (TFT + LSTM + XGBoost + LightGBM for temporal predictions)
 - **Automated risk management** (position sizing, stop-loss, confidence filtering)
 
 ### Key Differentiators
 
 1. **Early Sentiment Detection** - Reddit signals momentum before mainstream news
-2. **Multi-Model Ensemble** - LSTM + XGBoost + LightGBM reduce overfitting
+2. **TFT Ensemble Architecture** - Temporal Fusion Transformer + multi-model ensemble reduce overfitting
 3. **Risk-First Design** - Every signal validated by risk manager before execution
 4. **Production Architecture** - Async APIs, background tasks, proper observability
 

@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from backend.api.routes import posts, stocks
 from backend.config.settings import settings
+from backend.cache.redis_client import get_redis, close_redis
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
@@ -10,10 +12,26 @@ from backend.database.config import get_db
 from backend.models.reddit import RedditPost
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Application lifespan manager.
+    
+    Startup: Initialize Redis cache connection
+    Shutdown: Close Redis connection gracefully
+    """
+    # Startup
+    cache = await get_redis()
+    yield
+    # Shutdown
+    await close_redis()
+
+
 app = FastAPI(
-    title="TFT Stock Trader API",
+    title="Temporal Sentiment Trader API",
     version="1.0.0",
-    description="Reddit sentiment-based stock prediction API"
+    description="Reddit sentiment-based stock prediction API with TFT ensemble models",
+    lifespan=lifespan
 )
 
 # CORS - allow frontend to call API
@@ -32,7 +50,7 @@ app.include_router(stocks.router, prefix=API_PREFIX)
 
 @app.get("/")
 async def root():
-    return {"message": "TFT Stock Trader API", "status": "running"}
+    return {"message": "Temporal Sentiment Trader API", "status": "running"}
 
 @app.get("/health")
 async def health_check(

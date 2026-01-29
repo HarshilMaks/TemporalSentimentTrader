@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.models.stock import StockPrice
 from backend.services.stock_service import StockService
 from backend.database.config import get_db
+from backend.cache.redis_client import RedisCache, get_redis
 from backend.utils.logger import logger
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -159,19 +160,36 @@ async def get_stock_prices(
 @router.get("/latest/{ticker}", status_code=status.HTTP_200_OK)
 async def get_latest_price(
     ticker: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    cache: RedisCache = Depends(get_redis)
 ) -> Dict[str, Any]:
     """
     Get most recent closing price for a ticker.
+    
+    Uses Redis cache (5-min TTL) for fast responses.
+    Falls back to DB on cache miss.
     
     Args:
         ticker: Stock symbol
     
     Returns:
-        Latest closing price and timestamp
+        Latest closing price, timestamp, and cache source
     """
+    ticker = ticker.upper()
+    
+    # Check cache first (Write-Through pattern)
+    cached_price = await cache.get_stock_price(ticker)
+    if cached_price is not None:
+        return {
+            "ticker": ticker,
+            "close": cached_price,
+            "source": "cache",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    # Cache miss - query DB
     service = StockService()
-    price = await service.get_latest_price(ticker.upper(), db)
+    price = await service.get_latest_price(ticker, db)
     
     if price is None:
         raise HTTPException(
@@ -179,9 +197,13 @@ async def get_latest_price(
             detail=f"No price data found for {ticker}"
         )
     
+    # Update cache (Write-Through)
+    await cache.set_stock_price(ticker, price)
+    
     return {
-        "ticker": ticker.upper(),
+        "ticker": ticker,
         "close": price,
+        "source": "database",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -189,10 +211,13 @@ async def get_latest_price(
 @router.get("/signals/{ticker}", status_code=status.HTTP_200_OK)
 async def get_momentum_signals(
     ticker: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    cache: RedisCache = Depends(get_redis)
 ) -> Dict[str, Any]:
     """
     Get momentum indicators and trading signals for a ticker.
+    
+    Uses Redis cache (5-min TTL) for fast responses.
     
     Args:
         ticker: Stock symbol
@@ -200,8 +225,21 @@ async def get_momentum_signals(
     Returns:
         Latest momentum indicators with crossover signals
     """
+    ticker = ticker.upper()
+    
+    # Check cache first
+    cached_signals = await cache.get_stock_signals(ticker)
+    if cached_signals is not None:
+        return {
+            "ticker": ticker,
+            "signals": cached_signals,
+            "source": "cache",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    # Cache miss - compute from DB
     service = StockService()
-    signals = await service.get_momentum_signals(ticker.upper(), db)
+    signals = await service.get_momentum_signals(ticker, db)
     
     if signals is None:
         raise HTTPException(
@@ -209,9 +247,13 @@ async def get_momentum_signals(
             detail=f"No signal data found for {ticker}"
         )
     
+    # Update cache
+    await cache.set_stock_signals(ticker, signals)
+    
     return {
-        "ticker": ticker.upper(),
+        "ticker": ticker,
         "signals": signals,
+        "source": "database",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -251,3 +293,161 @@ async def stock_health_check(db: AsyncSession = Depends(get_db)) -> Dict[str, An
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stock data system unavailable"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task Management Endpoints (Background Job Triggers)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/tasks/fetch-trending", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_fetch_trending() -> Dict[str, Any]:
+    """
+    Trigger background task to fetch stock data for trending tickers.
+    
+    This queues a Celery task that:
+    1. Finds top 20 trending tickers from Reddit mentions (last 7 days)
+    2. Fetches 5-day price history for each
+    3. Calculates momentum indicators
+    
+    Returns immediately with task ID for tracking.
+    
+    Returns:
+        Task ID and queue status
+    """
+    from backend.tasks.scraping_tasks import fetch_stocks_scheduled
+    
+    task = fetch_stocks_scheduled.delay()
+    
+    return {
+        "task_id": task.id,
+        "status": "queued",
+        "message": "Trending stocks fetch task queued",
+        "check_status": f"/api/stocks/tasks/{task.id}"
+    }
+
+
+@router.post("/tasks/fetch-single/{ticker}", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_fetch_single(ticker: str) -> Dict[str, Any]:
+    """
+    Trigger background task to fetch a single stock.
+    
+    Useful for adding new tickers to watchlist without blocking.
+    
+    Args:
+        ticker: Stock symbol to fetch
+    
+    Returns:
+        Task ID for tracking
+    """
+    from backend.tasks.scraping_tasks import fetch_single_stock
+    
+    task = fetch_single_stock.delay(ticker.upper())
+    
+    return {
+        "task_id": task.id,
+        "status": "queued",
+        "ticker": ticker.upper(),
+        "message": f"Fetch task queued for {ticker.upper()}",
+        "check_status": f"/api/stocks/tasks/{task.id}"
+    }
+
+
+@router.post("/tasks/cleanup", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_cleanup(retention_days: int = Query(90, ge=30, le=365)) -> Dict[str, Any]:
+    """
+    Trigger background cleanup of old data.
+    
+    Removes data older than retention period to manage DB size.
+    
+    Args:
+        retention_days: Days to keep (30-365, default 90)
+    
+    Returns:
+        Task ID for tracking
+    """
+    from backend.tasks.maintenance_tasks import cleanup_old_data
+    
+    task = cleanup_old_data.delay(retention_days)
+    
+    return {
+        "task_id": task.id,
+        "status": "queued",
+        "retention_days": retention_days,
+        "message": f"Cleanup task queued (keeping {retention_days} days)"
+    }
+
+
+@router.get("/tasks/{task_id}", status_code=status.HTTP_200_OK)
+async def get_task_status(task_id: str) -> Dict[str, Any]:
+    """
+    Check status of a background task.
+    
+    Args:
+        task_id: Celery task ID
+    
+    Returns:
+        Task status, result if complete
+    """
+    from backend.celery_app import app as celery_app
+    
+    result = celery_app.AsyncResult(task_id)
+    
+    response = {
+        "task_id": task_id,
+        "status": result.status,  # PENDING, STARTED, SUCCESS, FAILURE, RETRY
+        "ready": result.ready(),
+    }
+    
+    if result.ready():
+        if result.successful():
+            response["result"] = result.result
+        else:
+            response["error"] = str(result.result)
+    
+    return response
+
+
+@router.get("/cache/stats", status_code=status.HTTP_200_OK)
+async def get_cache_stats(cache: RedisCache = Depends(get_redis)) -> Dict[str, Any]:
+    """
+    Get Redis cache statistics.
+    
+    Returns:
+        Cache hit rate, memory usage, connection status
+    """
+    stats = await cache.get_stats()
+    
+    return {
+        "cache": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.delete("/cache/{ticker}", status_code=status.HTTP_200_OK)
+async def invalidate_ticker_cache(
+    ticker: str,
+    cache: RedisCache = Depends(get_redis)
+) -> Dict[str, Any]:
+    """
+    Invalidate cache for a specific ticker.
+    
+    Use after manual data corrections or to force fresh data.
+    
+    Args:
+        ticker: Stock symbol
+    
+    Returns:
+        Invalidation status
+    """
+    ticker = ticker.upper()
+    
+    # Delete all cache keys for this ticker
+    deleted = await cache.delete_pattern(f"stock:*:{ticker}")
+    deleted += await cache.delete_pattern(f"sentiment:*:{ticker}")
+    
+    return {
+        "ticker": ticker,
+        "keys_deleted": deleted,
+        "message": f"Cache invalidated for {ticker}"
+    }
+
