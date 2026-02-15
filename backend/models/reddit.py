@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ARRAY, Index, Float, Numeric
+from sqlalchemy import Column, Integer, String, Text, DateTime, ARRAY, Index, Float, Numeric, Boolean
 from sqlalchemy.sql import func
 from backend.database.config import Base
 
@@ -13,6 +13,9 @@ class RedditPost(Base):
     author = Column(String(50))
     score = Column(Integer, default=0)
     num_comments = Column(Integer, default=0)
+    upvote_ratio = Column(Float, default=0.0)  # NEW: 0.0-1.0 upvote percentage
+    is_self = Column(Boolean, default=True)  # NEW: True=text post, False=link
+    link_flair_text = Column(String(100))  # NEW: Post flair tag
     tickers = Column(ARRAY(String), server_default='{}')
     sentiment_score = Column(Numeric(precision=5, scale=4), default=0.0)
     created_at = Column(DateTime(timezone=True), nullable=False)

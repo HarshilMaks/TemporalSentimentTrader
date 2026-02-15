@@ -3,7 +3,7 @@ from sqlalchemy import select
 from typing import Optional, Literal
 import asyncio
 from backend.models.reddit import RedditPost
-from backend.scrapers.mock_reddit import MockRedditScraper as RedditScraper, PostType
+from backend.scrapers.reddit_scraper import RedditScraper, PostType
 from backend.utils.ticker_extractor import extract_tickers
 from backend.utils.sentiment import analyze_sentiment
 from backend.utils.logger import logger
@@ -108,7 +108,7 @@ class RedditService:
                     # Calculate sentiment score
                     sentiment_score = analyze_sentiment(text)
                     
-                    # Create database record
+                    # Create database record with enhanced metadata
                     db_post = RedditPost(
                         post_id=post_data['post_id'],
                         subreddit=post_data['subreddit'],
@@ -117,6 +117,9 @@ class RedditService:
                         author=post_data['author'],
                         score=post_data['score'],
                         num_comments=post_data['num_comments'],
+                        upvote_ratio=post_data.get('upvote_ratio', 0.0),  # NEW
+                        is_self=post_data.get('is_self', True),  # NEW
+                        link_flair_text=post_data.get('link_flair_text', ''),  # NEW
                         tickers=tickers,
                         sentiment_score=sentiment_score,
                         created_at=post_data['created_at'],
