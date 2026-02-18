@@ -81,6 +81,12 @@ RATE_LIMITS: Dict[str, RateLimitConfig] = {
         description="Manual Reddit scraping - calls external Reddit API (expensive, use sparingly)"
     ),
     
+    "posts:analytics_quality": RateLimitConfig(
+        requests=50,
+        period="minute",
+        description="Quality analytics - aggregations with grouping (AVG, COUNT, GROUP BY tier)"
+    ),
+    
     # ═══════════════════════════════════════════════════════════════════════════
     # 💹 STOCKS ENDPOINTS (Market data - read-heavy, heavily cached)
     # ═══════════════════════════════════════════════════════════════════════════

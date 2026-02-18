@@ -3,10 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, text, func
 from backend.models.reddit import RedditPost
 from backend.database.config import get_db
-from backend.api.schemas.posts import PostListResponse, PostByTickerResponse, TrendingResponse, TickerSentiment
+from backend.api.schemas.posts import (
+    PostListResponse, PostByTickerResponse, TrendingResponse, TickerSentiment, QualityAnalyticsResponse
+)
 from backend.api.middleware.rate_limit import check_rate_limit
 from backend.config.rate_limits import RATE_LIMITS, get_period_seconds
 from backend.scrapers.reddit_scraper import RedditScraper
+from backend.services.reddit_service import RedditService
 from backend.utils.logger import get_logger
 from pydantic import BaseModel
 
@@ -186,6 +189,31 @@ async def rate_limit_posts_scrape(request: Request):
     )
 
 
+async def rate_limit_posts_analytics_quality(request: Request):
+    """
+    Rate limit: GET /posts/analytics/quality endpoint
+    
+    Limit: 50 requests per minute per IP address
+    
+    Rationale:
+    - Multiple aggregations: AVG(), COUNT(), SUM() with CASE statements
+    - GROUP BY aggregation for quality tier distribution
+    - Time-based filtering with index scan
+    - Similar cost to sentiment/trending endpoints
+    
+    Endpoint cost: 🟡 MEDIUM (multiple aggregations + GROUP BY)
+    """
+    config = RATE_LIMITS["posts:analytics_quality"]
+    period_seconds = get_period_seconds(config.period)
+    
+    return await check_rate_limit(
+        request=request,
+        endpoint_key="posts:analytics_quality",
+        limit=config.requests,
+        period_seconds=period_seconds
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENDPOINTS WITH RATE LIMITING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -311,12 +339,26 @@ async def get_posts(
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    quality_only: bool = Query(False, description="Filter for quality posts only"),
+    min_quality: int | None = Query(None, ge=0, le=100, description="Minimum quality score threshold"),
     _rate_limit = Depends(rate_limit_posts_list)  # ← Rate limit check happens here
 ) -> PostListResponse:
     """
     Get paginated Reddit posts
     
     Rate limited: 100 requests per minute per IP
+    
+    Query Parameters:
+    - page: Page number (default 1)
+    - page_size: Items per page (default 20, max 100)
+    - quality_only: If True, return only posts marked as quality (is_quality=True)
+    - min_quality: Minimum quality score (0-100). Overrides quality_only filter.
+    
+    Examples:
+    - GET /posts/ - All posts, paginated
+    - GET /posts/?quality_only=true - Only quality posts
+    - GET /posts/?min_quality=50 - Posts with quality_score >= 50
+    - GET /posts/?min_quality=70&page=2 - Page 2 of high-quality posts (70+)
     
     How rate limiting works:
     1. FastAPI calls Depends(rate_limit_posts_list)
@@ -337,16 +379,28 @@ async def get_posts(
     - If 429 is raised, endpoint code never runs
     """
     
+    # Build query with optional quality filters
+    query = select(RedditPost)
+    count_query = select(func.count(RedditPost.id))
+    
+    # Apply quality filters
+    if min_quality is not None:
+        query = query.where(RedditPost.quality_score >= min_quality)
+        count_query = count_query.where(RedditPost.quality_score >= min_quality)
+    elif quality_only:
+        query = query.where(RedditPost.is_quality == True)
+        count_query = count_query.where(RedditPost.is_quality == True)
+    
     # Calculate offset
     skip = (page - 1) * page_size
     
     # Get total count
-    count_result = await db.execute(select(func.count(RedditPost.id)))
+    count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
     
     # Get posts
     result = await db.execute(
-        select(RedditPost)
+        query
         .order_by(desc(RedditPost.score))
         .offset(skip)
         .limit(page_size)
@@ -487,3 +541,51 @@ async def get_ticker_sentiment(
         post_count=row.post_count,
         total_engagement=row.total_engagement or 0
     )
+
+
+@router.get("/analytics/quality", response_model=QualityAnalyticsResponse)
+async def get_quality_analytics(
+    db: AsyncSession = Depends(get_db),
+    hours: int = Query(24, ge=1, le=168, description="Time window in hours (max 7 days)"),
+    quality_threshold: int | None = Query(None, ge=0, le=100, description="Quality threshold (default: 50)"),
+    _rate_limit = Depends(rate_limit_posts_analytics_quality)  # ← Rate limit check
+) -> QualityAnalyticsResponse:
+    """
+    Get quality analytics for posts within a time window.
+    
+    Rate limited: 50 requests per minute per IP
+    
+    This endpoint performs multiple aggregations with GROUP BY for quality tier distribution.
+    
+    Query Parameters:
+    - hours: Time window in hours (1-168, default 24)
+    - quality_threshold: Minimum quality score for "high quality" classification (0-100, default 50)
+    
+    Returns:
+    - total: Total post count in time window
+    - avg_quality: Average quality score  
+    - high_quality_pct: Percentage of posts >= quality_threshold
+    - low_quality_pct: Percentage of posts < quality_threshold
+    - quality_distribution: Count by tier (poor/fair/good/excellent)
+    - quality_threshold: The threshold used
+    - time_window_hours: The time window used
+    
+    Examples:
+    - GET /posts/analytics/quality - Last 24 hours with default threshold (50)
+    - GET /posts/analytics/quality?hours=72 - Last 3 days
+    - GET /posts/analytics/quality?hours=24&quality_threshold=70 - Last 24h with 70+ threshold
+    """
+    try:
+        reddit_service = RedditService(min_quality=quality_threshold or 50)
+        analytics = await reddit_service.get_quality_analytics(
+                db=db,
+            hours=hours,
+            quality_threshold=quality_threshold
+        )
+        
+        return QualityAnalyticsResponse(**analytics)
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting quality analytics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get quality analytics: {str(e)}")
+

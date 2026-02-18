@@ -220,3 +220,75 @@ class RedditService:
             'acceptance_rate': (total_saved / total_fetched * 100) if total_fetched > 0 else 0,
             'by_subreddit': subreddit_stats
         }
+    
+    async def get_quality_analytics(
+        self,
+        db: AsyncSession,
+        hours: int = 24,
+        quality_threshold: Optional[int] = None
+    ) -> dict:
+        """
+        Get quality analytics for posts within a time window.
+        
+        Args:
+            db: Database session
+            hours: Time window in hours (default 24)
+            quality_threshold: Optional quality filter (default: self.min_quality)
+        
+        Returns:
+            Dictionary with analytics:
+            - total: Total post count
+            - avg_quality: Average quality score
+            - high_quality_pct: % of posts with quality >= threshold
+            - low_quality_pct: % of posts with quality < threshold
+            - quality_distribution: Count by tier (poor/fair/good/excellent)
+        """
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func, case
+        
+        threshold = quality_threshold if quality_threshold is not None else self.min_quality
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        
+        # Get aggregate stats
+        result = await db.execute(
+            select(
+                func.count(RedditPost.id).label('total'),
+                func.avg(RedditPost.quality_score).label('avg_quality'),
+                func.sum(case((RedditPost.quality_score >= threshold, 1), else_=0)).label('high_quality_count'),
+                func.sum(case((RedditPost.quality_score < threshold, 1), else_=0)).label('low_quality_count')
+            ).where(RedditPost.created_at >= cutoff_time)
+        )
+        
+        row = result.first()
+        total = row.total or 0
+        avg_quality = float(row.avg_quality) if row.avg_quality else 0.0
+        high_quality_count = row.high_quality_count or 0
+        low_quality_count = row.low_quality_count or 0
+        
+        # Get quality distribution by tier
+        tier_result = await db.execute(
+            select(
+                RedditPost.quality_tier,
+                func.count(RedditPost.id).label('count')
+            )
+            .where(RedditPost.created_at >= cutoff_time)
+            .group_by(RedditPost.quality_tier)
+        )
+        
+        tier_rows = tier_result.all()
+        quality_distribution = {tier: count for tier, count in tier_rows}
+        
+        # Ensure all tiers are present
+        for tier in ['poor', 'fair', 'good', 'excellent']:
+            if tier not in quality_distribution:
+                quality_distribution[tier] = 0
+        
+        return {
+            'total': total,
+            'avg_quality': round(avg_quality, 2),
+            'high_quality_pct': round((high_quality_count / total * 100) if total > 0 else 0, 2),
+            'low_quality_pct': round((low_quality_count / total * 100) if total > 0 else 0, 2),
+            'quality_distribution': quality_distribution,
+            'quality_threshold': threshold,
+            'time_window_hours': hours
+        }
