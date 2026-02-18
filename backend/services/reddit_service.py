@@ -7,6 +7,7 @@ from backend.scrapers.reddit_scraper import RedditScraper, PostType
 from backend.utils.ticker_extractor import extract_tickers
 from backend.utils.sentiment import analyze_sentiment
 from backend.utils.logger import logger
+from backend.services.quality_scorer import QualityScorer
 
 
 class RedditService:
@@ -19,8 +20,10 @@ class RedditService:
     # Target subreddits for stock discussion
     DEFAULT_SUBREDDITS = ['wallstreetbets', 'stocks', 'options']
     
-    def __init__(self):
+    def __init__(self, min_quality: int = 50):
         self.scraper = RedditScraper()
+        self.quality_scorer = QualityScorer(min_quality=min_quality)
+        self.min_quality = min_quality
     
     async def scrape_and_save(
         self, 
@@ -105,6 +108,27 @@ class RedditService:
                         skipped_count += 1
                         continue
                     
+                    # Score post quality before processing
+                    quality_result = self.quality_scorer.score_post(
+                        title=post_data['title'],
+                        body=post_data['body'],
+                        upvotes=post_data['score'],
+                        downvotes=int(post_data['score'] * (1 - post_data.get('upvote_ratio', 0.5))),
+                        comment_count=post_data['num_comments'],
+                        upvote_ratio=post_data.get('upvote_ratio', 0.5),
+                        created_at=post_data['created_at']
+                    )
+                    
+                    # Skip low-quality posts
+                    if not quality_result.is_quality:
+                        logger.debug(
+                            f"Skipping low-quality post {post_data['post_id']} "
+                            f"(score: {quality_result.overall_score}, tier: {quality_result.quality_tier}). "
+                            f"Flags: {quality_result.flags}"
+                        )
+                        skipped_count += 1
+                        continue
+                    
                     # Calculate sentiment score
                     sentiment_score = analyze_sentiment(text)
                     
@@ -122,6 +146,8 @@ class RedditService:
                         link_flair_text=post_data.get('link_flair_text', ''),  # NEW
                         tickers=tickers,
                         sentiment_score=sentiment_score,
+                        quality_score=quality_result.overall_score,  # NEW
+                        quality_tier=quality_result.quality_tier,  # NEW
                         created_at=post_data['created_at'],
                         url=post_data['url']
                     )
@@ -160,5 +186,6 @@ class RedditService:
             'skipped': total_skipped,
             'failed': total_failed,
             'total_fetched': total_fetched,
+            'quality_threshold': self.min_quality,
             'by_subreddit': subreddit_stats
         }

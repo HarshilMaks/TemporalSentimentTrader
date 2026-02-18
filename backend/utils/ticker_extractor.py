@@ -1,6 +1,48 @@
 import re
 
-# Comprehensive list of popular tickers across all categories
+# BLACKLIST: Common English words that often appear in ALL CAPS but are NOT tickers
+BLACKLIST_WORDS = {
+    # Single letters
+    'I', 'A',
+    
+    # Common articles & prepositions
+    'THE', 'FOR', 'AND', 'OR', 'BUT', 'NOT', 'IS', 'ARE', 'WAS', 'WERE', 'BE', 'BEING',
+    'HAVE', 'HAS', 'HAD', 'DO', 'DOES', 'DID', 'WILL', 'WOULD', 'COULD', 'SHOULD',
+    'MAY', 'MIGHT', 'MUST', 'CAN', 'AT', 'BY', 'IN', 'ON', 'TO', 'UP', 'OUT', 'OF',
+    'OVER', 'UNDER', 'WITH', 'FROM', 'AS', 'ABOUT', 'INTO', 'THROUGH', 'DURING',
+    
+    # Common verbs
+    'GET', 'MAKE', 'GO', 'COME', 'TAKE', 'PUT', 'SET', 'KEEP', 'HOLD', 'FIND',
+    'GIVE', 'TELL', 'WORK', 'CALL', 'NEED', 'WANT', 'LOOK', 'SEEM', 'FEEL', 'TRY',
+    'SELL', 'BUY', 'MARKET', 'STOCK',
+    
+    # Common adjectives & adverbs
+    'GOOD', 'BAD', 'BEST', 'WORST', 'NEW', 'OLD', 'BIG', 'SMALL', 'HIGH', 'LOW',
+    'LONG', 'SHORT', 'FAST', 'SLOW', 'EASY', 'HARD', 'FIRST', 'LAST', 'OTHER',
+    'SAME', 'DIFFERENT', 'ONLY', 'VERY', 'MORE', 'MOST', 'LESS', 'LEAST', 'ALL', 'SOME',
+    
+    # Common nouns
+    'TIME', 'YEAR', 'DAY', 'WEEK', 'MONTH', 'HOUR', 'MINUTE', 'SECOND', 'MOMENT',
+    'PLACE', 'WAY', 'THING', 'PEOPLE', 'MAN', 'WOMAN', 'CHILD', 'PERSON', 'LIFE',
+    'MONEY', 'PRICE', 'COST', 'VALUE', 'CASH', 'GAIN', 'LOSS', 'PROFIT', 'RISK',
+    'MARKET', 'TRADE', 'DEAL', 'BUSINESS', 'COMPANY', 'FIRM', 'BANK', 'FUND',
+    'RATE', 'RETURN', 'YIELD', 'GROWTH', 'TREND', 'DATA', 'INFO', 'NEWS',
+    
+    # Trading/Financial jargon that's not a ticker
+    'BUY', 'SELL', 'LONG', 'SHORT', 'BULL', 'BEAR', 'CALL', 'PUT', 'MOON', 'HOLD',
+    'HODL', 'YOLO', 'LOL', 'TO', 'THE', 'A', 'AN', 'AND', 'OR', 'IS', 'IT',
+    'THIS', 'THAT', 'THESE', 'THOSE', 'WHAT', 'WHICH', 'WHERE', 'WHEN', 'WHY', 'HOW',
+    
+    # Common financial terms that could be confused as tickers
+    'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD', 'INR', 'CNY',
+    'ETF', 'IPO', 'EPS', 'PE', 'ROE', 'ROI', 'IRR', 'ACB',
+    
+    # Internet slang & emoji replacements
+    'MOON', 'PUMP', 'DUMP', 'DIP', 'RIP', 'HODL', 'DIAMOND', 'HANDS',
+    'ROCKET', 'FIRE', 'TO', 'THE', 'DO', 'YOUR', 'OWN', 'DD', 'YOLO', 'NOW',
+}
+
+# WHITELIST: Comprehensive list of popular tickers across all categories
 KNOWN_TICKERS = {
     # FAANG + Tech Giants
     'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'AMD', 'INTC', 'TSLA',
@@ -73,16 +115,27 @@ KNOWN_TICKERS = {
 
 def extract_tickers(text: str) -> list[str]:
     """
-    Extract stock tickers from text using regex patterns.
+    Extract stock tickers from text using regex patterns and whitelisting.
     
     Handles:
     - Cashtags: $AAPL
     - All caps words: TSLA (2-5 letters)
     
     Filters:
-    - Only returns known tickers (prevents false positives like "YOLO", "LOL")
-    - De-duplicates
-    - Expands to 250+ tickers covering major markets
+    - BLACKLIST: Excludes common English words (THE, FOR, AND, etc.)
+    - WHITELIST: Only returns known tickers from KNOWN_TICKERS set
+    - De-duplicates results
+    - Case-insensitive matching
+    
+    Example:
+    >>> extract_tickers('$AAPL and $TSLA are great stocks')
+    ['AAPL', 'TSLA']
+    
+    >>> extract_tickers('THIS IS A TEST FOR BAD EXTRACTION')
+    []  # All blocked by blacklist
+    
+    >> extract_tickers('Buy $GOOG at the market tomorrow')
+    ['GOOG']  # THE and MARKET filtered by blacklist
     """
     # Pattern 1: Cashtags like $AAPL
     # Pattern 2: All caps words (2-5 letters) not preceded/followed by letters
@@ -93,7 +146,70 @@ def extract_tickers(text: str) -> list[str]:
     tickers = set()
     for match in matches:
         ticker = match[0] or match[1]  # match[0] for $AAPL, match[1] for AAPL
+        
+        # Reject if in blacklist (common English words)
+        if ticker in BLACKLIST_WORDS:
+            continue
+        
+        # Accept only if in whitelist (known tickers)
         if ticker in KNOWN_TICKERS:
             tickers.add(ticker)
     
     return sorted(list(tickers))  # Return sorted for consistency
+
+
+def has_stock_context(text: str, ticker: str, context_window: int = 50) -> bool:
+    """
+    Check if a ticker appears in stock-related context.
+    
+    Looks for stock keywords (buy, sell, trade, price, earnings, etc.) 
+    within context_window characters of the ticker.
+    
+    Args:
+        text: Full text to search
+        ticker: Ticker symbol to check context for
+        context_window: Number of characters to look around ticker (default: 50)
+    
+    Returns:
+        True if ticker has stock-related context, False otherwise
+    
+    Example:
+    >>> has_stock_context('I love AAPL stock', 'AAPL')
+    True
+    
+    >>> has_stock_context('AAPL is a common acronym', 'AAPL')
+    False
+    """
+    # Stock-related keywords that should appear near ticker
+    stock_keywords = {
+        'stock', 'buy', 'sell', 'trade', 'price', 'earnings', 'dividend',
+        'shares', 'share', 'trading', 'bullish', 'bearish', 'call', 'put',
+        'option', 'options', 'short', 'long', 'position', 'upside', 'downside',
+        '📈', '📉', '$', 'ticker', 'symbol', 'company', 'corporation', 'inc',
+        'corp', 'ltd', 'financial', 'investor', 'investment', 'profit', 'earnings',
+        'revenue', 'margin', 'pe', 'ratio', 'analysis', 'forecast', 'pump', 'dump',
+        'moon', 'diamond', 'hands', 'rocket', 'ipo', 'etf', 'portfolio', 'dd'
+    }
+    
+    # Find ticker position in text
+    ticker_upper = ticker.upper()
+    text_upper = text.upper()
+    
+    try:
+        ticker_pos = text_upper.find(ticker_upper)
+        if ticker_pos == -1:
+            return False
+        
+        # Get context around ticker
+        start = max(0, ticker_pos - context_window)
+        end = min(len(text), ticker_pos + len(ticker_upper) + context_window)
+        context = text_upper[start:end]
+        
+        # Check if any stock keyword appears in context
+        for keyword in stock_keywords:
+            if keyword.upper() in context:
+                return True
+        
+        return False
+    except Exception:
+        return False
