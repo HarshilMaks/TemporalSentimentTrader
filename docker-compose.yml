@@ -25,13 +25,13 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   celery_worker:
     build:
-      context: ..  # Build from parent directory
-      dockerfile: docker/Dockerfile
+      context: .  # Build from root directory
+      dockerfile: Dockerfile
       target: development
     container_name: tft-celery-worker
     command: celery -A backend.celery_app worker --loglevel=info --concurrency=2 --queues=scraping,ml --without-gossip --without-mingle --without-heartbeat
     env_file:
-      - ../.env  # Load all variables from .env
+      - .env  # Load all variables from .env
     environment:
       # Override/ensure these are set
       - PYTHONUNBUFFERED=1
@@ -45,8 +45,8 @@ services:
           memory: 512M
     volumes:
       # Code hot-reload during development
-      - ../backend:/app/backend
-      - ../scripts:/app/scripts
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
       # Logs persistent directory
       - celery_logs:/app/logs
     networks:
@@ -63,20 +63,20 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   celery_beat:
     build:
-      context: ..  # Build from parent directory
-      dockerfile: docker/Dockerfile
+      context: .  # Build from root directory
+      dockerfile: Dockerfile
       target: development
     container_name: tft-celery-beat
     command: celery -A backend.celery_app beat --loglevel=info --scheduler=celery.beat:PersistentScheduler
     env_file:
-      - ../.env  # Load all variables from .env
+      - .env  # Load all variables from .env
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
       # Code hot-reload during development
-      - ../backend:/app/backend
+      - ./backend:/app/backend
       # Schedule file persistence
-      - ./docker/celerybeat-schedule:/app/celerybeat-schedule
+      - ./celerybeat-schedule:/app/celerybeat-schedule
       # Logs persistent directory
       - celery_logs:/app/logs
     deploy:
@@ -103,7 +103,7 @@ services:
     image: mher/flower:2.0
     container_name: tft-flower
     env_file:
-      - ../.env  # Load for variable expansion
+      - .env  # Load for variable expansion
     command: celery --broker=${CELERY_BROKER_URL} --port=5555
     ports:
       - "5555:5555"

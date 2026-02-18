@@ -5,14 +5,14 @@
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # This script verifies that the Docker Compose setup is working correctly.
-# Run after: docker-compose -f docker/docker-compose.dev.yml up -d
+# Run after: docker-compose up -d
 #
 # Usage: bash scripts/verify_docker_setup.sh
 # ═════════════════════════════════════════════════════════════════════════════
 
 set -e  # Exit on error
 
-COMPOSE_FILE="docker/docker-compose.dev.yml"
+COMPOSE_FILE="docker-compose.yml"
 COLORS_OFF='\033[0m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,7 +54,7 @@ print_info() {
 
 # Check if docker-compose file exists
 if [ ! -f "$COMPOSE_FILE" ]; then
-  print_error "docker/docker-compose.dev.yml not found in current directory"
+  print_error "docker-compose.yml not found in current directory"
   exit 1
 fi
 
