@@ -170,6 +170,7 @@ class RedditService:
                         sentiment_score=sentiment_score,
                         quality_score=quality_result.overall_score,  # NEW
                         quality_tier=quality_result.quality_tier,  # NEW
+                        is_quality=quality_result.is_quality,  # NEW: Mark as quality post
                         created_at=post_data['created_at'],
                         url=post_data['url']
                     )
