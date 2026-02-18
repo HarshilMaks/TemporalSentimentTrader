@@ -627,22 +627,22 @@ Acceptance Criteria:
 #### **Daily Implementation Breakdown**:
 
 **Day 1-2 (8 hours): MLflow Integration & Baseline Training**
-- [ ] **Day 1 Morning** (2h): MLflow setup
-  - Install MLflow server (local dev, remote for staging)
-  - Create `backend/ml/tracking/mlflow_logger.py`
-  - Configure: feature snapshot ID, hyperparameters, metrics, artifacts
-- [ ] **Day 1 Afternoon** (2h): Training integration
-  - Update `train_ensemble.py` to log all experiments
-  - Track: which snapshot version → which model performance
-  - Save trained models with complete metadata
-- [ ] **Day 2 Morning** (2h): Baseline model training
-  - XGBoost model training with hyperparameter logging
-  - LightGBM model training with feature importance tracking  
-  - Track metrics: accuracy, precision, recall, F1, Sharpe ratio
-- [ ] **Day 2 Afternoon** (2h): TFT model training
-  - Temporal Fusion Transformer training on 30-day sequences
-  - Compare performance: LSTM vs TFT vs tree models
-  - Log computational cost and training time
+- [x] **Day 1 Morning** (2h): MLflow setup
+  - ✅ Install MLflow server (3.9.0 installed)
+  - ✅ Create `backend/ml/tracking/mlflow_logger.py` (330 lines)
+  - ✅ Configure: feature snapshot ID, hyperparameters, metrics, artifacts
+- [x] **Day 1 Afternoon** (2h): Training integration
+  - ✅ Update `train_ensemble.py` to log all experiments (324 lines)
+  - ✅ Track: which snapshot version → which model performance
+  - ✅ Save trained models with complete metadata (JSON + pickle)
+- [x] **Day 2 Morning** (2h): Baseline model training
+  - ✅ XGBoost model training with hyperparameter logging
+  - ✅ LightGBM model training with feature importance tracking  
+  - ✅ Track metrics: accuracy, precision, recall, F1, Sharpe ratio (BaselineTrainer, 385 lines)
+- [x] **Day 2 Afternoon** (2h): TFT model training
+  - ✅ Temporal Fusion Transformer training on 30-day sequences (TFTTrainer)
+  - ✅ Compare performance: LSTM vs TFT vs tree models (compare_with_baseline())
+  - ✅ Log computational cost and training time (memory + timing tracking)
 
 **Day 3 (4 hours): Backtesting & Validation**
 - [ ] **Morning** (2h): Backtest infrastructure  
