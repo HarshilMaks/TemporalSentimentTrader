@@ -1,7 +1,7 @@
 """Optimize quality scoring with performance indexes.
 
 Revision ID: 002_optimize_quality_scoring
-Revises: 6aeb58d1fa26
+Revises: 003_add_quality_fields
 Create Date: 2026-02-18 11:00:00.000000
 
 This migration:
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 
 
 revision: str = '002_optimize_quality_scoring'
-down_revision: Union[str, Sequence[str], None] = '6aeb58d1fa26'
+down_revision: Union[str, Sequence[str], None] = '003_add_quality_fields'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

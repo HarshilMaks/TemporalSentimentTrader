@@ -83,11 +83,27 @@ class RedditService:
         total_fetched = 0
         subreddit_stats = {}
         
+        # Enhanced tracking of skip reasons
+        skip_reasons = {
+            'no_tickers': 0,
+            'duplicate': 0,
+            'low_quality': 0,
+            'other': 0
+        }
+        
         for subreddit in subreddits:
             posts = all_posts.get(subreddit, [])
             saved_count = 0
             skipped_count = 0
             failed_count = 0
+            
+            # Per-subreddit skip tracking
+            sub_skip_reasons = {
+                'no_tickers': 0,
+                'duplicate': 0,
+                'low_quality': 0,
+                'other': 0
+            }
             
             for post_data in posts:
                 try:
@@ -98,6 +114,8 @@ class RedditService:
                     # Skip posts with no stock mentions
                     if not tickers:
                         skipped_count += 1
+                        sub_skip_reasons['no_tickers'] += 1
+                        skip_reasons['no_tickers'] += 1
                         continue
                     
                     # Check if post already exists (avoid duplicates)
@@ -106,6 +124,8 @@ class RedditService:
                     )
                     if result.scalar_one_or_none():
                         skipped_count += 1
+                        sub_skip_reasons['duplicate'] += 1
+                        skip_reasons['duplicate'] += 1
                         continue
                     
                     # Score post quality before processing
@@ -127,6 +147,8 @@ class RedditService:
                             f"Flags: {quality_result.flags}"
                         )
                         skipped_count += 1
+                        sub_skip_reasons['low_quality'] += 1
+                        skip_reasons['low_quality'] += 1
                         continue
                     
                     # Calculate sentiment score
@@ -173,7 +195,13 @@ class RedditService:
                 'saved': saved_count,
                 'skipped': skipped_count,
                 'failed': failed_count,
-                'fetched': len(posts)
+                'fetched': len(posts),
+                'skip_reasons': {
+                    'no_tickers': sub_skip_reasons['no_tickers'],
+                    'duplicate': sub_skip_reasons['duplicate'],
+                    'low_quality': sub_skip_reasons['low_quality'],
+                    'other': sub_skip_reasons['other']
+                }
             }
             
             total_saved += saved_count
@@ -187,5 +215,7 @@ class RedditService:
             'failed': total_failed,
             'total_fetched': total_fetched,
             'quality_threshold': self.min_quality,
+            'skip_reasons': skip_reasons,
+            'acceptance_rate': (total_saved / total_fetched * 100) if total_fetched > 0 else 0,
             'by_subreddit': subreddit_stats
         }
