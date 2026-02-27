@@ -1,0 +1,14 @@
+* RSI
+* MACD
+* Bollinger Band Position
+* 50-Day Moving Average
+* 200-Day Moving Average
+* Volume Ratio
+* On-Balance Volume (OBV)
+* Sentiment Score
+* Sentiment Trend
+* Mention Count
+* Sentiment Volatility
+* 5-Day Price Change
+* 10-Day Price Change
+* 20-Day Volatility

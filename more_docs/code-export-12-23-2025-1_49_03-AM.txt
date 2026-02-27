@@ -1,0 +1,164 @@
+title Financial Data Pipeline & ML Prediction System
+
+// DATA SOURCES
+Data Sources [icon: database] {
+  Reddit API [icon: reddit]
+  Yahoo Finance [icon: yahoo]
+  OpenAI GPT-4 [icon: openai]
+  NewsAPI [icon: newspaper]
+  Economic Data [icon: bar-chart-2]
+}
+
+// DATA INGESTION - Celery Workers
+Data Ingestion [icon: server] {
+  Reddit Scraper [icon: feather, label: "Reddit Scraper"]
+  Stock Price Fetcher [icon: dollar-sign, label: "Stock Price Fetcher"]
+  News Aggregator [icon: rss, label: "News Aggregator"]
+  Rate Limiter [icon: redis, label: "Rate Limiter"]
+}
+
+// PROCESSING LAYER
+Processing Layer [icon: cpu] {
+  Sentiment Analyzer [icon: brain, label: "Sentiment Analyzer"]
+  Ticker Extractor [icon: tag, label: "Ticker Extractor"]
+  Feature Engineer [icon: settings, label: "Feature Engineer"]
+  News Event Classifier [icon: alert-circle, label: "News Event Classifier"]
+}
+
+// STORAGE - PostgreSQL + TimescaleDB
+Storage [icon: database] {
+  Reddit Posts [icon: file-text, label: "reddit_posts"]
+  Sentiment Analysis [icon: activity, label: "sentiment_analysis"]
+  Stock Prices [icon: trending-up, label: "stock_prices"]
+  ML Predictions [icon: bar-chart, label: "ml_predictions"]
+  News Events [icon: file, label: "news_events"]
+}
+
+// CACHE - Redis
+Cache [icon: redis] {
+  API Response Cache [icon: clock, label: "API Response Cache"]
+  Celery Task Queue [icon: list, label: "Celery Task Queue"]
+}
+
+// ML PIPELINE
+ML Pipeline [icon: flask] {
+  Feature Store [icon: database, label: "Feature Store"]
+  TFT Model [icon: cpu, label: "TFT Model"]
+  XGBoost [icon: cpu, label: "XGBoost"]
+  LightGBM [icon: cpu, label: "LightGBM"]
+  Stacking Ensemble [icon: layers, label: "Stacking Ensemble"]
+}
+
+// RISK MANAGEMENT
+Risk Management [icon: shield] {
+  Confidence Filter [icon: filter, label: "Confidence Filter"]
+  Regime Detection [icon: activity, label: "Regime Detection"]
+  Position Sizing [icon: divide, label: "Position Sizing"]
+}
+
+// FASTAPI BACKEND
+FastAPI Backend [icon: fastapi] {
+  REST API [icon: server, label: "REST API"]
+  WebSocket [icon: wifi, label: "WebSocket"]
+  Auth Middleware [icon: key, label: "Auth Middleware"]
+}
+
+// API ENDPOINTS
+API Endpoints [icon: globe] {
+  Get Posts [icon: download, label: "GET /api/posts"]
+  Get Sentiment [icon: download, label: "GET /api/sentiment/:ticker"]
+  Get Predictions [icon: download, label: "GET /api/predictions/:ticker"]
+  Get Trending [icon: download, label: "GET /api/stocks/trending"]
+  Post Login [icon: upload, label: "POST /api/auth/login"]
+  WS Prices [icon: wifi, label: "WS /ws/prices/:ticker"]
+}
+
+// NEXT.JS FRONTEND
+NextJS Frontend [icon: nextdotjs] {
+  Dashboard [icon: layout, label: "Dashboard"]
+  Stock Detail [icon: bar-chart-2, label: "Stock Detail"]
+  Predictions [icon: trending-up, label: "Predictions"]
+  Watchlist [icon: star, label: "Watchlist"]
+}
+
+// MONITORING
+Monitoring [icon: activity] {
+  MLflow [icon: flask, label: "MLflow"]
+  Sentry [icon: alert-triangle, label: "Sentry"]
+  Prometheus Grafana [icon: bar-chart, label: "Prometheus + Grafana"]
+}
+
+// Connections: Data Sources to Ingestion
+Reddit API > Reddit Scraper
+Yahoo Finance > Stock Price Fetcher
+OpenAI GPT-4 > Sentiment Analyzer
+NewsAPI > News Aggregator
+Economic Data > Feature Engineer
+
+// Ingestion to Rate Limiter
+Reddit Scraper > Rate Limiter
+Stock Price Fetcher > Rate Limiter
+News Aggregator > Rate Limiter
+
+// Ingestion to Processing
+Reddit Scraper > Ticker Extractor
+Ticker Extractor > Sentiment Analyzer
+Stock Price Fetcher > Feature Engineer
+News Aggregator > News Event Classifier
+
+// Processing to Storage
+Sentiment Analyzer > Sentiment Analysis
+Ticker Extractor > Reddit Posts
+Feature Engineer > Stock Prices
+News Event Classifier > News Events
+
+// Storage to ML Pipeline
+
+// ML Pipeline flow
+Feature Store > TFT Model
+Feature Store > XGBoost
+Feature Store > LightGBM
+
+TFT Model > Stacking Ensemble
+XGBoost > Stacking Ensemble
+LightGBM > Stacking Ensemble
+
+Stacking Ensemble > Confidence Filter
+
+// Risk Management
+Confidence Filter > Regime Detection
+Regime Detection > Position Sizing
+
+// Storage to Cache
+Reddit Posts > API Response Cache
+Sentiment Analysis > API Response Cache
+Stock Prices > API Response Cache
+ML Predictions > API Response Cache
+
+// Cache to Backend
+API Response Cache > REST API
+
+// Backend connections
+REST API > Auth Middleware
+REST API > Get Posts
+REST API > Get Sentiment
+REST API > Get Predictions
+REST API > Get Trending
+REST API > Post Login
+WebSocket > WS Prices
+
+// API Endpoints to Frontend
+Get Posts > Dashboard
+Get Sentiment > Stock Detail
+Get Predictions > Predictions
+Get Trending > Dashboard
+WS Prices > Stock Detail
+
+// ML Pipeline to Monitoring
+Stacking Ensemble > MLflow
+REST API > Sentry
+REST API > Prometheus Grafana
+Storage > ML Pipeline
+ML Pipeline > Storage
+Reddit Scraper < Celery Task Queue
+Stock Price Fetcher < Celery Task Queue

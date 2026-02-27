@@ -1,0 +1,195 @@
+You want to build a system that feels like **"legal insider trading"**—essentially, you want **Information Arbitrage**. This means knowing something significant before the general retail market reacts.
+
+To achieve ~80% win rates (which is extremely difficult, professional HFT firms aim for 55-60%), you cannot rely on just one signal (like Reddit). You must stack **three layers of edge**.
+
+Here is the complete design for a **High-Alpha Swing Trading System**, including the architecture, strategies, and backend algorithms.
+
+---
+
+### **1. The Strategy: "The Triangulation Method"**
+
+To get "insider-level" accuracy, you only trade when **three independent data sources** agree. This filters out 90% of noise and leaves only high-probability setups.
+
+#### **Layer 1: The "Insider" Data (Legal Insider Trading)**
+
+This is the closest to what you asked for. You track the people who actually know the company's future.
+
+* **Corporate Insiders (SEC Form 4):** When a CEO or CFO buys their own stock with their own money, the stock historically outperforms.
+* *Data Source:* SEC EDGAR (via `sec-api` or `edgartools` library).
+
+
+* **Senate/Congress Trading:** Tracking what US Senators trade (e.g., the "Nancy Pelosi Tracker"). They often trade on legislative knowledge.
+* *Data Source:* `House Stock Watcher` API or `Senate Stock Watcher`.
+
+
+
+#### **Layer 2: The "Dark" Flow (Institutional Money)**
+
+Retail traders trade on "Lit Exchanges" (NASDAQ/NYSE). Institutions often trade in **Dark Pools** or use **Unusual Options** to hide their moves.
+
+* **Volume Anomalies:** If a stock is flat but Volume is 300% higher than average, someone is accumulating silently.
+* **Options Flow:** Heavy Call buying (especially "Out of the Money") implies someone expects a massive jump.
+
+#### **Layer 3: The "Hype" (Your Current Project)**
+
+* **Reddit/Social Sentiment:** This acts as the "match" that lights the fuelpile accumulated by Insiders and Institutions.
+
+---
+
+### **2. The Trading Algorithm: "Regime-Weighted Voting"**
+
+Don't just use one model. Use a voting system where different signals have different "veto" powers.
+
+**The Algorithm Flow:**
+
+1. **Regime Detection (The Gatekeeper):**
+* *Logic:* Is the S&P 500 (SPY) above its 200-day Moving Average?
+* *Rule:* If Market is Bearish, **DISABLE ALL BUYS** (or switch to Short strategies).
+
+
+2. **Score Generation (0-100):**
+* `Insider_Score`: CEO Bought = +30 points.
+* `Flow_Score`: Volume > 200% avg = +20 points.
+* `Sentiment_Score`: Reddit Mentions spiking = +20 points.
+* `Technical_Score`: RSI < 30 (Oversold) = +30 points.
+
+
+3. **Execution Trigger:**
+* **BUY Signal:** Total Score > 80.
+
+
+
+---
+
+### **3. System Architecture (Backend Design)**
+
+To handle **Live Ticking** and volume analysis, the simple cron-job architecture isn't enough. You need an **Event-Driven Architecture**.
+
+**Technology Stack Changes:**
+
+* **FastAPI:** Keeps managing the API.
+* **Redis Pub/Sub:** Handles the "Ticking" data (real-time).
+* **TimescaleDB (Extension for PostgreSQL):** You MUST use this. Standard Postgres is too slow for storing millions of millisecond-level stock ticks.
+
+#### **The "Live Ticking" Implementation**
+
+To support "live volume" and real-time updates without crashing your server:
+
+1. **The Ingestor (Worker):**
+* Connects to a WebSocket (e.g., Alpaca/Polygon.io).
+* Receives a trade: `{ticker: "AAPL", price: 150.01, volume: 100}`.
+* **Action 1:** Pushes to Redis Channel `live_trades`.
+* **Action 2:** Aggregates 1-minute candle -> Saves to TimescaleDB.
+
+
+2. **The Analyzer (Worker):**
+* Subscribes to Redis `live_trades`.
+* **Real-time Logic:** `Current_Volume += incoming_volume`.
+* *Check:* Is `Current_Volume` > `Average_Volume_at_this_time_of_day`?
+* *Alert:* If yes, trigger "Unusual Volume" event.
+
+
+3. **The Frontend Socket:**
+* FastAPI exposes a WebSocket endpoint `/ws/stocks/{ticker}`.
+* It listens to Redis and pushes updates to the user's React dashboard instantly.
+
+
+
+---
+
+### **4. "How will I design the backend?" (Concrete Steps)**
+
+Here is the folder structure update you need to make to your project:
+
+```text
+backend/
+  ├── strategy/
+  │   ├── insider_tracker.py    <-- New: Fetches SEC Form 4
+  │   ├── dark_pool.py          <-- New: Calculates Vol/OI anomalies
+  │   └── regime_filter.py      <-- New: Checks SPY trend
+  ├── streams/
+  │   ├── socket_listener.py    <-- Connects to Alpaca WebSocket
+  │   └── redis_publisher.py    <-- Broadcasts ticks
+  └── analysis/
+      ├── feature_store.py      <-- Aligns Reddit (irregular) with Stock (regular)
+      └── signal_engine.py      <-- The "Voting" logic
+
+```
+
+### **5. Critical "Alpha" Advice**
+
+You said you want consistent profit. Here is the harsh truth about Algo Trading:
+
+1. **Latency doesn't matter for Swing Trading:** You don't need nanosecond speed. You need **Information Synthesis**.
+2. **The "News" is too late:** By the time a news article is published, HFT bots have already traded it.
+* *Solution:* Use the **Raw Data** (SEC filings, Reddit comments) *before* they become news articles.
+
+
+3. **Stop Loss is King:** 80% accuracy is great, but one -50% loss kills you. Hard code a "Max Loss" (e.g., -5%) into your execution logic.
+
+### **Next Action for You**
+
+We need to add the **Insider Data** layer first, as that is your "Legal Insider Trading" component.
+
+**Shall I generate the code for `insider_tracker.py` to fetch SEC Form 4 filings (CEO Buys) and link it to your database?**
+
+[Insider Trading Strategies with Python](https://www.google.com/search?q=https://www.youtube.com/watch%3Fv%3DM9-2bQd8cXs)
+*This video explains how to use Python to scrape SEC Form 4 data to track CEO/Insider buying activity, which is the exact "legal insider" edge your strategy needs.*
+
+Short answer: the repo and docs show a solid Reddit+momentum ML
+  swing‑trading platform (feature engineering, Celery orchestration,
+  risk manager, ensemble models) so you’re on the right high‑level
+  track, but it currently lacks the “Insider” and institutional
+  “dark‑flow” data layers, real‑time tick ingestion/analytics (Redis
+  Pub/Sub + Timescale/TimescaleDB), an MLflow model registry/drift
+  pipeline, and an execution/broker integration needed for true
+  information‑arbitrage.
+
+  Recommended, prioritized changes: add
+  backend/strategy/insider_tracker.py (SEC Form‑4 + congressional
+  disclosures) and DB model; add backend/strategy/dark_pool.py and
+  options_flow extractor; add backend/streams/socket_listener.py +
+  backend/streams/redis_publisher.py and TimescaleDB for millisecond
+  ticks with an Analyzer worker for unusual‑volume detection; implement
+  backend/strategy/regime_filter.py and upgrade
+  backend/analysis/signal_engine.py to Regime‑Weighted Voting
+  (Insider/Flow/Sentiment/Technical scoring); and integrate MLflow/model
+  registry, retraining/drift detection, and a broker execution connector
+  with enforced stop‑loss and position sizing.
+
+  Next step: implement the insider data layer first (highest alpha,
+  lowest infra cost) — confirm and I’ll generate starter
+  insider_tracker.py, the DB model/migration, and a Celery ingestion
+  task to wire it into the feature pipeline.Short answer: you won’t reliably hit “maximum” or ~80% accuracy with
+  Reddit + standard technical features alone — your current stack
+  (sentiment + LSTM/XGBoost/LightGBM ensemble + risk manager) is a
+  strong baseline and, with careful engineering, can plausibly reach
+  ~55–65% on 3–7 day swing horizons but not 80% without additional
+  high‑alpha signals and rigorous evaluation.
+
+  Most impactful changes to materially improve accuracy: add high‑alpha
+  data (SEC Form‑4 insider buys, options/unusual flow,
+  institutional/dark‑pool volume, order‑book/tick data), fix labeling &
+  evaluation (explicit horizon/target, time‑series walk‑forward CV,
+  purge/lookahead prevention, include slippage/fees), enrich feature
+  engineering (multi‑source sentiment, event detectors, cross‑feature
+  interactions), and harden MLOps (calibration, MLflow model registry,
+  drift detection, automated retrain).
+
+  Practical next step: integrate the insider data pipeline (SEC Form‑4
+  ingestion → DB model → feature join) and run walk‑forward backtests to
+  measure uplift; say if you want me to scaffold the insider_tracker, DB
+  migration, and ingestion task.
+Confirmed: backend/ml/training/tft_training.py implements a TFT‑style
+  model (MultiHeadAttention + FFN), a 30‑day SequenceBuilder, and an
+  LSTM trainer with MLflow logging and baseline comparison.
+  TFT often improves temporal pattern capture and can raise accuracy
+  versus vanilla LSTM/XGBoost on sequence problems, but by itself it
+  won't reliably push a Reddit+technical feature stack to ~80% — you
+  still need high‑alpha signals (SEC Form‑4, options/unusual flow,
+  dark‑pool/tick data), correct labeling, walk‑forward CV, calibration,
+  and drift detection.
+  Next step: run a controlled ablation (TFT vs LSTM vs tree models) with
+  walk‑forward CV and hyperparameter search, then add insider/options
+  features if TF T gains are marginal; confirm and I’ll scaffold the
+  ablation + MLflow experiment pipeline.
