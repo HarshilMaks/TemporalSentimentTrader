@@ -59,10 +59,11 @@ app.conf.update(
 
 # Scheduled tasks (Beat schedule)
 app.conf.beat_schedule = {
-    # Ingest SEC Form 4 insider trades daily at 5 PM ET (10 PM UTC)
+    # Ingest SEC Form 4 + NSE insider trades daily
+    # 2:00 AM UTC = 7:30 AM IST (laptop is on) = 9:00 PM ET (after US close)
     "ingest-insider-trades": {
         "task": "backend.tasks.insider_tasks.ingest_insider_trades",
-        "schedule": crontab(hour=22, minute=0),
+        "schedule": crontab(hour=2, minute=0),
         "options": {"queue": "scraping"},
     },
 
@@ -79,10 +80,12 @@ app.conf.beat_schedule = {
         "options": {"queue": "scraping"},
     },
     
-    # Generate trading signals daily at 5:30 PM ET (10:30 PM UTC), after insider ingestion
+    # Generate trading signals daily
+    # 2:30 AM UTC = 8:00 AM IST (before Indian market open at 9:15 AM)
+    # Also covers US: 9:30 PM ET (well after US close at 4 PM ET)
     "generate-signals": {
         "task": "backend.tasks.ml_tasks.generate_daily_signals",
-        "schedule": crontab(hour=22, minute=30),  # 10:30 PM UTC = 5:30 PM ET
+        "schedule": crontab(hour=2, minute=30),
         "options": {"queue": "ml"},
     },
     

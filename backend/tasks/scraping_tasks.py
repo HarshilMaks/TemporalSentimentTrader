@@ -55,12 +55,8 @@ def fetch_stocks_scheduled(self, tickers: List[str] = None):
     
     # Default watchlist (top 20 trending stocks)
     if tickers is None:
-        tickers = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
-            "NVDA", "META", "AMD", "NFLX", "DIS",
-            "BABA", "INTC", "CSCO", "ADBE", "PYPL",
-            "CRM", "ORCL", "UBER", "SPOT", "COIN"
-        ]
+        from backend.strategy.signal_engine import DEFAULT_WATCHLIST
+        tickers = DEFAULT_WATCHLIST
     
     async def _fetch():
         async with AsyncSessionLocal() as session:

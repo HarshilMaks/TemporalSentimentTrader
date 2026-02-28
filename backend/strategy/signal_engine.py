@@ -36,10 +36,15 @@ from backend.strategy.regime_filter import RegimeFilter
 logger = logging.getLogger(__name__)
 
 DEFAULT_WATCHLIST = [
+    # US (NYSE/NASDAQ)
     "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
     "NVDA", "META", "AMD", "NFLX", "DIS",
     "BABA", "INTC", "CSCO", "ADBE", "PYPL",
     "CRM", "ORCL", "UBER", "SPOT", "COIN",
+    # India (NSE) — .NS suffix required by yfinance
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+    "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS",
+    "TATAMOTORS.NS", "TATASTEEL.NS", "BAJFINANCE.NS", "TITAN.NS", "ITC.NS",
 ]
 
 DEFAULT_PORTFOLIO_VALUE = 100_000.0
@@ -265,12 +270,18 @@ class SignalEngine:
 
     # ── Scoring helpers (unchanged) ──────────────────────────────────────
 
+    @staticmethod
+    def _base_ticker(ticker: str) -> str:
+        """Strip exchange suffix (.NS, .BO) for DB lookups against insider/sentiment data."""
+        return ticker.split(".")[0]
+
     async def _score_insider(self, ticker: str, session: AsyncSession) -> int:
         """Layer 1: Insider buying score (0-30)."""
+        base = self._base_ticker(ticker)
         cutoff = datetime.now(timezone.utc).date() - timedelta(days=30)
         rows = await session.execute(
             select(InsiderTrade).where(
-                InsiderTrade.ticker == ticker,
+                InsiderTrade.ticker.in_([ticker, base]),
                 InsiderTrade.transaction_date >= cutoff,
             )
         )
@@ -303,13 +314,14 @@ class SignalEngine:
 
     async def _score_sentiment(self, ticker: str, session: AsyncSession) -> int:
         """Layer 3: Retail hype — Reddit + India RSS sentiment (0-20)."""
+        base = self._base_ticker(ticker)
         since = datetime.now(timezone.utc) - timedelta(days=7)
         row = await session.execute(
             select(
                 func.avg(RedditPost.sentiment_score),
                 func.count(RedditPost.id),
             ).where(
-                RedditPost.tickers.any(ticker),
+                (RedditPost.tickers.any(ticker) | RedditPost.tickers.any(base)),
                 RedditPost.created_at >= since,
             )
         )
