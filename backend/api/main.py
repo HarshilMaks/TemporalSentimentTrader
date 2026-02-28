@@ -43,14 +43,17 @@ async def lifespan(app: FastAPI):
     redis_url = settings.redis_url
     
     try:
-        redis_client = Redis.from_url(
-            redis_url,
-            encoding="utf8",
-            decode_responses=True,
-            ssl=True,  # Required for Redis Cloud (Mumbai)
-            ssl_certfile=None,  # Use system SSL certificates
-            ssl_keyfile=None,
-        )
+        # Use rediss:// scheme for SSL, or pass ssl=True for redis:// URLs
+        use_ssl = redis_url.startswith("rediss://") or "upstash" in redis_url or "redis-cloud" in redis_url
+        connect_kwargs = {
+            "encoding": "utf8",
+            "decode_responses": True,
+        }
+        if use_ssl and not redis_url.startswith("rediss://"):
+            # Force SSL via URL scheme — redis-py 7.x prefers this over ssl= kwarg
+            redis_url = redis_url.replace("redis://", "rediss://", 1)
+
+        redis_client = Redis.from_url(redis_url, **connect_kwargs)
         
         # Test connection
         await redis_client.ping()

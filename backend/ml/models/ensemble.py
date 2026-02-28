@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 SIGNAL_LABELS = {0: "BUY", 1: "HOLD", 2: "SELL"}
 WEIGHTS = {"xgboost": 0.40, "lightgbm": 0.30, "tft": 0.30}
-CONFIDENCE_THRESHOLD = 0.70
+CONFIDENCE_THRESHOLD = 0.70  # Production threshold
 
 
 class EnsembleModel:
@@ -108,14 +108,14 @@ class EnsembleModel:
     def save(self, directory: str):
         d = Path(directory)
         d.mkdir(parents=True, exist_ok=True)
-        self.xgb.save(str(d / "xgboost.pkl"))
-        self.lgb.save(str(d / "lightgbm.pkl"))
-        self.tft.save(str(d / "tft.pt"))
+        self.xgb.save(str(d / "xgboost_model.pkl"))
+        self.lgb.save(str(d / "lightgbm_model.pkl"))
+        self.tft.save(str(d / "lstm_model.pt"))
 
     def load(self, directory: str):
         d = Path(directory)
-        self.xgb.load(str(d / "xgboost.pkl"))
-        self.lgb.load(str(d / "lightgbm.pkl"))
-        tft_path = d / "tft.pt"
+        self.xgb.load(str(d / "xgboost_model.pkl"))
+        self.lgb.load(str(d / "lightgbm_model.pkl"))
+        tft_path = d / "lstm_model.pt"
         if tft_path.exists():
             self.tft.load(str(tft_path))

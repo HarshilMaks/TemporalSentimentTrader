@@ -107,6 +107,8 @@ class FeatureBuilder:
             # Get tickers if not provided
             if tickers is None:
                 tickers = await self._get_active_tickers(session)
+            elif isinstance(tickers, str):
+                tickers = [tickers]
             
             if not tickers:
                 logger.warning("No active tickers found")

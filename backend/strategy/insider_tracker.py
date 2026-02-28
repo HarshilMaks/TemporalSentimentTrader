@@ -45,7 +45,6 @@ class InsiderTracker:
 
     def _fetch_filings_list(self, start: date, end: date) -> List[Dict]:
         """Get list of recent Form 4 filings from EDGAR full-text search API."""
-        url = f"https://efts.sec.gov/LATEST/search-index?q=%224%22&forms=4&dateRange=custom&startdt={start.isoformat()}&enddt={end.isoformat()}"
         try:
             resp = requests.get(
                 "https://efts.sec.gov/LATEST/search-index",
@@ -61,9 +60,25 @@ class InsiderTracker:
             )
             resp.raise_for_status()
             data = resp.json()
-            return data.get("hits", {}).get("hits", [])
+            hits = data.get("hits", {}).get("hits", [])
+
+            # Convert search-index hits into dicts with a usable URL
+            filings: List[Dict] = []
+            for hit in hits:
+                _id = hit.get("_id", "")
+                src = hit.get("_source", {})
+                if ":" not in _id or not _id.endswith(".xml"):
+                    continue
+                if "4" not in src.get("root_forms", []):
+                    continue
+                accession_raw, filename = _id.split(":", 1)
+                # Accession number: remove first two dashes → directory name
+                accession = accession_raw.replace("-", "", 2)
+                cik = src.get("ciks", [""])[-1]  # last CIK is typically the issuer
+                url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{filename}"
+                filings.append({"url": url})
+            return filings
         except Exception:
-            # Fallback: use the EDGAR ATOM feed
             return self._fetch_from_atom_feed()
 
     def _fetch_from_atom_feed(self) -> List[Dict]:
@@ -90,6 +105,9 @@ class InsiderTracker:
         Attempts to fetch the XML filing and extract transaction details.
         Returns only BUY (acquisition) transactions.
         """
+        import time as _time
+        _time.sleep(0.15)  # SEC rate limit: 10 req/sec
+
         filing_url = filing.get("url") or filing.get("_source", {}).get("file_url", "")
         if not filing_url:
             return None
@@ -199,27 +217,28 @@ class InsiderTracker:
             txn_date = trade.get("transaction_date")
             if isinstance(txn_date, str):
                 txn_date = datetime.strptime(txn_date, "%Y-%m-%d").date()
-            if txn_date < cutoff:
+            if txn_date is None or txn_date < cutoff:
                 continue
             if trade.get("transaction_type") != "BUY":
                 continue
 
             buyer_count += 1
             title = (trade.get("insider_title") or "").lower()
+            title_words = set(title.replace(",", " ").replace(".", " ").split())
 
             if txn_date >= recent_7d:
                 # Recent buys score higher
-                if any(kw in title for kw in C_SUITE):
+                if title_words & C_SUITE:
                     score = max(score, 30)
-                elif any(kw in title for kw in DIRECTOR):
+                elif title_words & DIRECTOR:
                     score = max(score, 20)
                 else:
                     score = max(score, 15)
             else:
                 # Older buys within lookback
-                if any(kw in title for kw in C_SUITE):
+                if title_words & C_SUITE:
                     score = max(score, 20)
-                elif any(kw in title for kw in DIRECTOR):
+                elif title_words & DIRECTOR:
                     score = max(score, 10)
 
         # Cluster buying bonus: multiple insiders = stronger conviction

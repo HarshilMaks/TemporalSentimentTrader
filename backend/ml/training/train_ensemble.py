@@ -16,13 +16,14 @@ Usage:
 import json
 import logging
 import pickle
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import xgboost as xgb
-from lightgbm import LGBMRegressor
+from lightgbm import LGBMClassifier
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import cross_val_score
 
@@ -42,7 +43,7 @@ class EnsembleTrainer:
             exp_name: MLflow experiment name
             tracking_uri: MLflow tracking server URI (optional)
         """
-        self.logger = get_mlflow_logger(exp_name, tracking_uri)
+        self.logger = get_mlflow_logger(exp_name, f"ensemble_{int(time.time())}", "ensemble", "ensemble")
         self.models = {}
         self.feature_snapshot_id = None
 
@@ -110,21 +111,8 @@ class EnsembleTrainer:
         y_test: Optional[np.ndarray] = None,
         hyperparams: Optional[Dict[str, Any]] = None,
         cv_folds: int = 5,
-    ) -> xgb.XGBRegressor:
-        """
-        Train XGBoost model with MLflow logging.
-
-        Args:
-            X_train: Training features
-            y_train: Training target
-            X_test: Test features (optional)
-            y_test: Test target (optional)
-            hyperparams: XGBoost hyperparameters (optional)
-            cv_folds: Number of cross-validation folds
-
-        Returns:
-            Trained XGBoost model
-        """
+    ):
+        """Train XGBoost classifier with MLflow logging."""
         default_params = {
             "n_estimators": 100,
             "max_depth": 6,
@@ -132,30 +120,31 @@ class EnsembleTrainer:
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "random_state": 42,
+            "objective": "multi:softprob",
+            "num_class": 3,
+            "eval_metric": "mlogloss",
         }
-
         if hyperparams:
             default_params.update(hyperparams)
 
         self._log_hyperparameters("xgboost", default_params)
 
-        logger.info("Training XGBoost model...")
-        model = xgb.XGBRegressor(**default_params)
-        model.fit(X_train, y_train, eval_metric="mae", verbose=False)
+        logger.info("Training XGBoost classifier...")
+        model = xgb.XGBClassifier(**default_params)
+        model.fit(X_train, y_train, verbose=False)
 
-        y_pred_train = model.predict(X_train)
-
-        cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring="r2")
-        self.logger.log_metrics_final(
-            {
-                "xgboost.cv_mean_r2": float(cv_scores.mean()),
-                "xgboost.cv_std_r2": float(cv_scores.std()),
-            }
-        )
+        cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring="accuracy")
+        self.logger.log_metrics_final({
+            "xgboost.cv_mean_acc": float(cv_scores.mean()),
+            "xgboost.cv_std_acc": float(cv_scores.std()),
+        })
 
         if X_test is not None and y_test is not None:
-            y_pred_test = model.predict(X_test)
-            self._log_metrics("xgboost", y_test, y_pred_test, y_pred_train, y_train)
+            from sklearn.metrics import accuracy_score, classification_report
+            y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            self.logger.log_metrics_final({"xgboost.test_accuracy": acc})
+            logger.info(f"XGBoost test accuracy: {acc:.4f}")
 
         self.models["xgboost"] = model
         logger.info("XGBoost training completed")
@@ -169,7 +158,7 @@ class EnsembleTrainer:
         y_test: Optional[np.ndarray] = None,
         hyperparams: Optional[Dict[str, Any]] = None,
         cv_folds: int = 5,
-    ) -> LGBMRegressor:
+    ) -> LGBMClassifier:
         """
         Train LightGBM model with MLflow logging.
 
@@ -199,23 +188,22 @@ class EnsembleTrainer:
 
         self._log_hyperparameters("lightgbm", default_params)
 
-        logger.info("Training LightGBM model...")
-        model = LGBMRegressor(**default_params)
+        logger.info("Training LightGBM classifier...")
+        model = LGBMClassifier(**default_params, objective="multiclass", num_class=3)
         model.fit(X_train, y_train)
 
-        y_pred_train = model.predict(X_train)
-
-        cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring="r2")
-        self.logger.log_metrics_final(
-            {
-                "lightgbm.cv_mean_r2": float(cv_scores.mean()),
-                "lightgbm.cv_std_r2": float(cv_scores.std()),
-            }
-        )
+        cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring="accuracy")
+        self.logger.log_metrics_final({
+            "lightgbm.cv_mean_acc": float(cv_scores.mean()),
+            "lightgbm.cv_std_acc": float(cv_scores.std()),
+        })
 
         if X_test is not None and y_test is not None:
-            y_pred_test = model.predict(X_test)
-            self._log_metrics("lightgbm", y_test, y_pred_test, y_pred_train, y_train)
+            from sklearn.metrics import accuracy_score
+            y_pred = model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            self.logger.log_metrics_final({"lightgbm.test_accuracy": acc})
+            logger.info(f"LightGBM test accuracy: {acc:.4f}")
 
         self.models["lightgbm"] = model
         logger.info("LightGBM training completed")
@@ -260,8 +248,8 @@ class EnsembleTrainer:
         with open(metadata_path, "w") as f:
             json.dump(metadata_dict, f, indent=2)
 
-        self.logger.log_artifact(str(model_path))
-        self.logger.log_artifact(str(metadata_path))
+        self.logger.log_artifact_file(str(model_path))
+        self.logger.log_artifact_file(str(metadata_path))
 
         logger.info(f"Model saved to {model_path}")
         logger.info(f"Metadata saved to {metadata_path}")

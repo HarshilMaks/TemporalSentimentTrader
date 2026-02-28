@@ -29,7 +29,7 @@ DEFAULT_WATCHLIST = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
     "NVDA", "META", "AMD", "NFLX", "DIS",
     "BABA", "INTC", "CSCO", "ADBE", "PYPL",
-    "CRM", "ORCL", "UBER", "SPOT", "SQ",
+    "CRM", "ORCL", "UBER", "SPOT", "COIN",
 ]
 
 DEFAULT_PORTFOLIO_VALUE = 100_000.0
@@ -199,7 +199,7 @@ class SignalEngine:
         """Score → ML validate → risk check → build TradingSignal."""
         tri = await self.calculate_triangulation_score(ticker, session)
 
-        if tri.total_score < 60:
+        if tri.total_score < 60:  # Production threshold
             return None
 
         # Build feature vector from latest stock data for ML
@@ -222,13 +222,14 @@ class SignalEngine:
             price.sma_50 or price.close,
             price.sma_200 or price.close,
             price.volume_ratio or 1.0,
-            float(tri.insider_score),
-            float(tri.sentiment_score),
+            price.close,
+            price.volume or 0,
+            price.high - price.low if price.high and price.low else 0.0,
         ], dtype=np.float32)
 
         result = self.predictor.predict_single(ticker, features)
 
-        if result["signal"] != "BUY" or result["confidence"] < 0.7:
+        if result["signal"] != "BUY" or result["confidence"] < 0.7:  # Production threshold
             return None
 
         # Risk validation

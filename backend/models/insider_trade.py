@@ -18,13 +18,14 @@ class InsiderTrade(Base):
     dollar_value = Column(Float, nullable=True)
     transaction_date = Column(Date, nullable=False)
     filing_date = Column(Date, nullable=True)
-    filing_url = Column(String(500), nullable=True, unique=True)
+    filing_url = Column(String(500), nullable=True)
     source = Column(String(10), nullable=False, default="SEC")  # SEC or SEBI
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("idx_insider_ticker_date", "ticker", "transaction_date"),
+        Index("idx_insider_filing_url", "filing_url"),
     )
 
     def __repr__(self):

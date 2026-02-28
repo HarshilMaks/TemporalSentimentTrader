@@ -98,7 +98,7 @@ class BaselineTrainer:
             tracking_uri: MLflow tracking server URI (optional)
             problem_type: 'classification' or 'regression'
         """
-        self.logger = get_mlflow_logger(exp_name, tracking_uri)
+        self.logger = get_mlflow_logger(exp_name, f"baseline_{int(time.time())}", "baseline", problem_type)
         self.problem_type = problem_type
         self.models = {}
         self.results = {}
@@ -256,8 +256,8 @@ class BaselineTrainer:
         logger.info("Training XGBoost model...")
         start_time = time.time()
 
-        model = xgb.XGBRegressor(**default_params)
-        model.fit(self.X_train, self.y_train, eval_metric="mae", verbose=False)
+        model = xgb.XGBRegressor(**default_params, eval_metric="mae")
+        model.fit(self.X_train, self.y_train, verbose=False)
 
         training_time = time.time() - start_time
         self.logger.log_metrics_final({"xgboost.training_time_seconds": float(training_time)})

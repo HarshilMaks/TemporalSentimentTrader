@@ -145,7 +145,7 @@ class RiskManager:
     # Configuration - Risk Limits (Customizable)
     # ─────────────────────────────────────────────────────────────────────────
     
-    MIN_CONFIDENCE = 0.70  # 70% minimum
+    MIN_CONFIDENCE = 0.70  # Production threshold
     MAX_RISK_PER_TRADE = 0.02  # 2% of portfolio
     MAX_POSITION_SIZE = 0.20  # 20% of portfolio
     MIN_RISK_REWARD_RATIO = 2.0  # 1:2 (1 risk for 2 reward)

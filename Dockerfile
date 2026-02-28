@@ -31,6 +31,7 @@ RUN uv pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY backend/ ./backend/
 COPY scripts/ ./scripts/
+COPY alembic/ ./alembic/
 COPY alembic.ini ./
 COPY pyproject.toml ./
 
@@ -58,6 +59,7 @@ RUN uv pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY backend/ ./backend/
 COPY scripts/ ./scripts/
+COPY alembic/ ./alembic/
 COPY alembic.ini ./
 COPY pyproject.toml ./
 

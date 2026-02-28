@@ -115,29 +115,40 @@ class MLflowLogger:
         print(f"✅ MLflow run started: {self.run_id}")
         return self.run_id
     
-    def log_params(self, **params) -> None:
+    def log_params(self, params: dict = None, **kwargs) -> None:
         """
         Log hyperparameters.
         
         Args:
-            **params: Key-value hyperparameters
-                e.g., learning_rate=0.1, max_depth=6, n_estimators=100
+            params: Dict of key-value hyperparameters (optional)
+            **kwargs: Key-value hyperparameters
         """
-        for key, value in params.items():
+        all_params = {}
+        if params:
+            all_params.update(params)
+        all_params.update(kwargs)
+        for key, value in all_params.items():
             mlflow.log_param(key, value)
-        print(f"✅ Logged {len(params)} parameters")
+        print(f"✅ Logged {len(all_params)} parameters")
     
-    def log_metrics(self, **metrics) -> None:
+    def log_metrics(self, metrics: dict = None, **kwargs) -> None:
         """
         Log training/validation metrics.
         
         Args:
-            **metrics: Key-value metrics
-                e.g., accuracy=0.92, precision=0.89, recall=0.85, f1=0.87
+            metrics: Dict of key-value metrics (optional)
+            **kwargs: Key-value metrics
         """
-        for key, value in metrics.items():
+        all_metrics = {}
+        if metrics:
+            all_metrics.update(metrics)
+        all_metrics.update(kwargs)
+        for key, value in all_metrics.items():
             mlflow.log_metric(key, value)
-        print(f"✅ Logged {len(metrics)} metrics")
+        print(f"✅ Logged {len(all_metrics)} metrics")
+
+    # Alias used by trainers
+    log_metrics_final = log_metrics
     
     def log_step_metrics(self, step: int, **metrics) -> None:
         """
