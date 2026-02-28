@@ -1,323 +1,228 @@
+"""Reddit + India RSS service layer.
+
+Scrapes real data only — no mocks. Uses:
+- Reddit .json backdoor (US hype) — zero API keys
+- India RSS feeds (India hype) — zero credentials
+"""
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, Literal
-import os
 import asyncio
+
 from backend.models.reddit import RedditPost
+from backend.scrapers.reddit_json_scraper import RedditJsonScraper
+from backend.scrapers.india_rss_scraper import IndiaRssScraper
 from backend.utils.ticker_extractor import extract_tickers
 from backend.utils.sentiment import analyze_sentiment
 from backend.utils.logger import logger
 from backend.services.quality_scorer import QualityScorer
 
-# Use real Reddit API if credentials exist and work, otherwise fall back to mock
-_has_creds = False
-try:
-    from backend.scrapers.reddit_scraper import RedditScraper, PostType
-    _cid = os.getenv("REDDIT_CLIENT_ID", "")
-    _csec = os.getenv("REDDIT_CLIENT_SECRET", "")
-    if _cid and _csec and _cid != "your_14_char_client_id":
-        # Quick auth check — PRAW is lazy, force a request
-        import praw  # type: ignore
-        _r = praw.Reddit(
-            client_id=_cid,
-            client_secret=_csec,
-            user_agent=os.getenv("REDDIT_USER_AGENT", "TFTTrader/1.0"),
-        )
-        _r.user.me()  # triggers actual auth; returns None for script apps = OK
-        _has_creds = True
-except Exception:
-    pass
-
-if not _has_creds:
-    from backend.scrapers.mock_reddit import MockRedditScraper as RedditScraper  # type: ignore[assignment,no-redef]
-    logger.warning("Reddit API unavailable — using MockRedditScraper")
-
 PostType = Literal['hot', 'new', 'rising', 'top']
 
 
 class RedditService:
-    """
-    Service layer for Reddit data operations.
-    Handles business logic: scraping → extraction → storage.
-    Targets: r/wallstreetbets, r/stocks, r/options
+    """Scrapes Reddit (US) + RSS (India) and stores to DB.
 
-    Falls back to MockRedditScraper when REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET
-    are not set, so the full pipeline works without Reddit API approval.
+    No API keys needed. No mocks. Real data only.
     """
-    
-    # Target subreddits for stock discussion
+
     DEFAULT_SUBREDDITS = ['wallstreetbets', 'stocks', 'options']
-    
+
     def __init__(self, min_quality: int = 50):
-        self.scraper = RedditScraper()
+        self.scraper = RedditJsonScraper()
+        self.india_scraper = IndiaRssScraper()
         self.quality_scorer = QualityScorer(min_quality=min_quality)
         self.min_quality = min_quality
-        self.using_mock = not _has_creds
-    
+        self.using_mock = False  # kept for backward compat — always False now
+
     async def scrape_and_save(
-        self, 
-        db: AsyncSession, 
+        self,
+        db: AsyncSession,
         subreddits: Optional[list[str]] = None,
         limit: int = 100,
         post_type: PostType = 'hot',
-        time_filter: str = 'day'
-    ) -> dict[str, int | dict[str, dict[str, int]]]:
-        """
-        Scrape Reddit posts from multiple subreddits using hybrid approach.
-        
-        Args:
-            db: Database session
-            subreddits: List of subreddits to scrape (defaults to wallstreetbets, stocks, options)
-            limit: Number of posts to fetch per subreddit
-            post_type: Type of posts ('hot', 'new', 'rising', 'top')
-            time_filter: For 'top' posts ('hour', 'day', 'week', 'month', 'year', 'all')
-        
-        Returns:
-            Dictionary with stats: saved, skipped, failed, by_subreddit
-            
-        Hybrid Approach:
-        Phase 1: Scrape all subreddits in parallel (fast network I/O)
-        Phase 2: Process and save to DB sequentially (safe transactions)
-        """
+        time_filter: str = 'day',
+        include_india: bool = True,
+    ) -> dict:
+        """Scrape Reddit + India RSS, extract tickers/sentiment, save to DB."""
         if subreddits is None:
             subreddits = self.DEFAULT_SUBREDDITS
-        
-        logger.info(f"Scraping {len(subreddits)} subreddits in parallel...")
-        
-        # ⚡ PHASE 1: PARALLEL SCRAPING (fast)
+
+        # Phase 1: Parallel scraping
         scrape_tasks = [
-            asyncio.to_thread(
-                self.scraper.scrape_posts,
-                subreddit, limit, post_type, time_filter
-            )
-            for subreddit in subreddits
+            asyncio.to_thread(self.scraper.scrape_posts, sub, limit, post_type, time_filter)
+            for sub in subreddits
         ]
-        
-        scrape_results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
-        
-        # Map results to subreddits
-        all_posts = {}
-        for subreddit, result in zip(subreddits, scrape_results):
-            if isinstance(result, Exception):
-                logger.error(f"Failed to scrape r/{subreddit}: {result}")
-                all_posts[subreddit] = []
+        if include_india:
+            scrape_tasks.append(asyncio.to_thread(self.india_scraper.scrape_feeds, 200))
+
+        results = await asyncio.gather(*scrape_tasks, return_exceptions=True)
+
+        # Collect all posts
+        all_posts: list[dict] = []
+        for i, sub in enumerate(subreddits):
+            r = results[i]
+            if isinstance(r, Exception):
+                logger.error(f"Failed to scrape r/{sub}: {r}")
             else:
-                all_posts[subreddit] = result
-                logger.info(f"Fetched {len(result)} posts from r/{subreddit}")
-        
-        # 🔒 PHASE 2: SEQUENTIAL PROCESSING & SAVING (safe)
-        total_saved = 0
-        total_skipped = 0
-        total_failed = 0
-        total_fetched = 0
-        subreddit_stats = {}
-        
-        # Enhanced tracking of skip reasons
-        skip_reasons = {
-            'no_tickers': 0,
-            'duplicate': 0,
-            'low_quality': 0,
-            'other': 0
-        }
-        
-        for subreddit in subreddits:
-            posts = all_posts.get(subreddit, [])
-            saved_count = 0
-            skipped_count = 0
-            failed_count = 0
-            
-            # Per-subreddit skip tracking
-            sub_skip_reasons = {
-                'no_tickers': 0,
-                'duplicate': 0,
-                'low_quality': 0,
-                'other': 0
-            }
-            
-            for post_data in posts:
-                try:
-                    # Extract tickers from title + body
-                    text = f"{post_data['title']} {post_data['body']}"
-                    tickers = extract_tickers(text)
-                    
-                    # Skip posts with no stock mentions
-                    if not tickers:
-                        skipped_count += 1
-                        sub_skip_reasons['no_tickers'] += 1
-                        skip_reasons['no_tickers'] += 1
-                        continue
-                    
-                    # Check if post already exists (avoid duplicates)
-                    result = await db.execute(
-                        select(RedditPost).where(RedditPost.post_id == post_data['post_id'])
-                    )
-                    if result.scalar_one_or_none():
-                        skipped_count += 1
-                        sub_skip_reasons['duplicate'] += 1
-                        skip_reasons['duplicate'] += 1
-                        continue
-                    
-                    # Score post quality before processing
-                    quality_result = self.quality_scorer.score_post(
-                        title=post_data['title'],
-                        body=post_data['body'],
-                        upvotes=post_data['score'],
-                        downvotes=int(post_data['score'] * (1 - post_data.get('upvote_ratio', 0.5))),
-                        comment_count=post_data['num_comments'],
-                        upvote_ratio=post_data.get('upvote_ratio', 0.5),
-                        created_at=post_data['created_at']
-                    )
-                    
-                    # Skip low-quality posts
-                    if not quality_result.is_quality:
-                        logger.debug(
-                            f"Skipping low-quality post {post_data['post_id']} "
-                            f"(score: {quality_result.overall_score}, tier: {quality_result.quality_tier}). "
-                            f"Flags: {quality_result.flags}"
-                        )
-                        skipped_count += 1
-                        sub_skip_reasons['low_quality'] += 1
-                        skip_reasons['low_quality'] += 1
-                        continue
-                    
-                    # Calculate sentiment score
-                    sentiment_score = analyze_sentiment(text)
-                    
-                    # Create database record with enhanced metadata
-                    db_post = RedditPost(
-                        post_id=post_data['post_id'],
-                        subreddit=post_data['subreddit'],
-                        title=post_data['title'],
-                        body=post_data['body'],
-                        author=post_data['author'],
-                        score=post_data['score'],
-                        num_comments=post_data['num_comments'],
-                        upvote_ratio=post_data.get('upvote_ratio', 0.0),  # NEW
-                        is_self=post_data.get('is_self', True),  # NEW
-                        link_flair_text=post_data.get('link_flair_text', ''),  # NEW
-                        tickers=tickers,
-                        sentiment_score=sentiment_score,
-                        quality_score=quality_result.overall_score,  # NEW
-                        quality_tier=quality_result.quality_tier,  # NEW
-                        is_quality=quality_result.is_quality,  # NEW: Mark as quality post
-                        created_at=post_data['created_at'],
-                        url=post_data['url']
-                    )
-                    
-                    db.add(db_post)
-                    saved_count += 1
-                    
-                except Exception as e:
-                    print(f"Error processing post {post_data.get('post_id')}: {e}")
-                    failed_count += 1
-                    continue
-            
-            # Commit per subreddit (transaction boundary)
-            try:
-                await db.commit()
-                logger.info(f"r/{subreddit}: {saved_count} saved, {skipped_count} skipped, {failed_count} failed")
-            except Exception as e:
-                await db.rollback()
-                logger.error(f"Failed to commit r/{subreddit}: {e}")
-            
-            # Track stats per subreddit
-            subreddit_stats[subreddit] = {
-                'saved': saved_count,
-                'skipped': skipped_count,
-                'failed': failed_count,
-                'fetched': len(posts),
-                'skip_reasons': {
-                    'no_tickers': sub_skip_reasons['no_tickers'],
-                    'duplicate': sub_skip_reasons['duplicate'],
-                    'low_quality': sub_skip_reasons['low_quality'],
-                    'other': sub_skip_reasons['other']
-                }
-            }
-            
-            total_saved += saved_count
-            total_skipped += skipped_count
-            total_failed += failed_count
-            total_fetched += len(posts)
-        
+                all_posts.extend(r)
+
+        # India RSS results (already have tickers + sentiment pre-computed)
+        india_posts: list[dict] = []
+        if include_india and len(results) > len(subreddits):
+            r = results[-1]
+            if isinstance(r, Exception):
+                logger.error(f"India RSS failed: {r}")
+            else:
+                india_posts = r
+
+        # Phase 2: Process and save
+        saved, skipped, failed = 0, 0, 0
+        skip_reasons = {'no_tickers': 0, 'duplicate': 0, 'low_quality': 0}
+
+        # Process Reddit posts (need ticker extraction + sentiment)
+        for post in all_posts:
+            result = await self._process_and_save(db, post, extract=True, skip_reasons=skip_reasons)
+            if result == 'saved':
+                saved += 1
+            elif result == 'skipped':
+                skipped += 1
+            else:
+                failed += 1
+
+        # Process India RSS posts (tickers + sentiment already computed)
+        for post in india_posts:
+            result = await self._process_and_save(db, post, extract=False, skip_reasons=skip_reasons)
+            if result == 'saved':
+                saved += 1
+            elif result == 'skipped':
+                skipped += 1
+            else:
+                failed += 1
+
+        try:
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Commit failed: {e}")
+
+        total = saved + skipped + failed
+        logger.info(f"Hype layer: {saved} saved, {skipped} skipped, {failed} failed (Reddit: {len(all_posts)}, India RSS: {len(india_posts)})")
+
         return {
-            'saved': total_saved,
-            'skipped': total_skipped,
-            'failed': total_failed,
-            'total_fetched': total_fetched,
+            'saved': saved,
+            'skipped': skipped,
+            'failed': failed,
+            'total_fetched': total,
             'quality_threshold': self.min_quality,
             'skip_reasons': skip_reasons,
-            'acceptance_rate': (total_saved / total_fetched * 100) if total_fetched > 0 else 0,
-            'by_subreddit': subreddit_stats
+            'acceptance_rate': (saved / total * 100) if total > 0 else 0,
         }
-    
-    async def get_quality_analytics(
-        self,
-        db: AsyncSession,
-        hours: int = 24,
-        quality_threshold: Optional[int] = None
-    ) -> dict:
-        """
-        Get quality analytics for posts within a time window.
-        
-        Args:
-            db: Database session
-            hours: Time window in hours (default 24)
-            quality_threshold: Optional quality filter (default: self.min_quality)
-        
-        Returns:
-            Dictionary with analytics:
-            - total: Total post count
-            - avg_quality: Average quality score
-            - high_quality_pct: % of posts with quality >= threshold
-            - low_quality_pct: % of posts with quality < threshold
-            - quality_distribution: Count by tier (poor/fair/good/excellent)
-        """
-        from datetime import datetime, timedelta, timezone
+
+    async def _process_and_save(self, db: AsyncSession, post: dict, extract: bool, skip_reasons: dict) -> str:
+        """Process a single post and save to DB. Returns 'saved', 'skipped', or 'failed'."""
+        try:
+            # Extract tickers + sentiment if not pre-computed (Reddit posts)
+            if extract:
+                text = f"{post['title']} {post.get('body', '')}"
+                tickers = extract_tickers(text)
+                if not tickers:
+                    skip_reasons['no_tickers'] += 1
+                    return 'skipped'
+                sentiment = analyze_sentiment(text)
+            else:
+                tickers = post.get('tickers', [])
+                sentiment = post.get('sentiment_score', 0.0)
+                if not tickers:
+                    skip_reasons['no_tickers'] += 1
+                    return 'skipped'
+
+            # Dedup
+            exists = (await db.execute(
+                select(RedditPost.id).where(RedditPost.post_id == post['post_id'])
+            )).first()
+            if exists:
+                skip_reasons['duplicate'] += 1
+                return 'skipped'
+
+            # Quality scoring — skip for RSS (professional news sources)
+            is_rss = post.get('subreddit', '').startswith('rss:')
+            if is_rss:
+                quality_score, quality_tier, is_quality = 75.0, 'good', True
+            else:
+                quality = self.quality_scorer.score_post(
+                    title=post['title'],
+                    body=post.get('body', ''),
+                    upvotes=post.get('score', 0),
+                    downvotes=int(post.get('score', 0) * (1 - post.get('upvote_ratio', 0.5))),
+                    comment_count=post.get('num_comments', 0),
+                    upvote_ratio=post.get('upvote_ratio', 0.5),
+                    created_at=post.get('created_at'),
+                )
+                if not quality.is_quality:
+                    skip_reasons['low_quality'] += 1
+                    return 'skipped'
+                quality_score, quality_tier, is_quality = quality.overall_score, quality.quality_tier, quality.is_quality
+
+            db.add(RedditPost(
+                post_id=post['post_id'],
+                subreddit=post.get('subreddit', ''),
+                title=post['title'],
+                body=post.get('body', ''),
+                author=post.get('author', ''),
+                score=post.get('score', 0),
+                num_comments=post.get('num_comments', 0),
+                upvote_ratio=post.get('upvote_ratio', 0.0),
+                is_self=post.get('is_self', True),
+                link_flair_text=post.get('link_flair_text', ''),
+                tickers=tickers,
+                sentiment_score=sentiment,
+                quality_score=quality_score,
+                quality_tier=quality_tier,
+                is_quality=is_quality,
+                created_at=post.get('created_at'),
+                url=post.get('url', ''),
+            ))
+            return 'saved'
+
+        except Exception as e:
+            logger.error(f"Error processing post {post.get('post_id')}: {e}")
+            return 'failed'
+
+    async def get_quality_analytics(self, db: AsyncSession, hours: int = 24, quality_threshold: Optional[int] = None) -> dict:
+        """Get quality analytics for posts within a time window."""
+        from datetime import timedelta
         from sqlalchemy import func, case
-        
-        threshold = quality_threshold if quality_threshold is not None else self.min_quality
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
-        # Get aggregate stats
+
+        threshold = quality_threshold or self.min_quality
+        cutoff = __import__('datetime').datetime.now(__import__('datetime').timezone.utc) - timedelta(hours=hours)
+
         result = await db.execute(
             select(
                 func.count(RedditPost.id).label('total'),
                 func.avg(RedditPost.quality_score).label('avg_quality'),
-                func.sum(case((RedditPost.quality_score >= threshold, 1), else_=0)).label('high_quality_count'),
-                func.sum(case((RedditPost.quality_score < threshold, 1), else_=0)).label('low_quality_count')
-            ).where(RedditPost.created_at >= cutoff_time)
+                func.sum(case((RedditPost.quality_score >= threshold, 1), else_=0)).label('high'),
+                func.sum(case((RedditPost.quality_score < threshold, 1), else_=0)).label('low'),
+            ).where(RedditPost.created_at >= cutoff)
         )
-        
         row = result.first()
         total = row.total or 0
-        avg_quality = float(row.avg_quality) if row.avg_quality else 0.0
-        high_quality_count = row.high_quality_count or 0
-        low_quality_count = row.low_quality_count or 0
-        
-        # Get quality distribution by tier
+
         tier_result = await db.execute(
-            select(
-                RedditPost.quality_tier,
-                func.count(RedditPost.id).label('count')
-            )
-            .where(RedditPost.created_at >= cutoff_time)
+            select(RedditPost.quality_tier, func.count(RedditPost.id))
+            .where(RedditPost.created_at >= cutoff)
             .group_by(RedditPost.quality_tier)
         )
-        
-        tier_rows = tier_result.all()
-        quality_distribution = {tier: count for tier, count in tier_rows}
-        
-        # Ensure all tiers are present
-        for tier in ['poor', 'fair', 'good', 'excellent']:
-            if tier not in quality_distribution:
-                quality_distribution[tier] = 0
-        
+        dist = {tier: cnt for tier, cnt in tier_result.all()}
+        for t in ['poor', 'fair', 'good', 'excellent']:
+            dist.setdefault(t, 0)
+
         return {
             'total': total,
-            'avg_quality': round(avg_quality, 2),
-            'high_quality_pct': round((high_quality_count / total * 100) if total > 0 else 0, 2),
-            'low_quality_pct': round((low_quality_count / total * 100) if total > 0 else 0, 2),
-            'quality_distribution': quality_distribution,
+            'avg_quality': round(float(row.avg_quality or 0), 2),
+            'high_quality_pct': round((row.high or 0) / total * 100, 2) if total else 0,
+            'low_quality_pct': round((row.low or 0) / total * 100, 2) if total else 0,
+            'quality_distribution': dist,
             'quality_threshold': threshold,
-            'time_window_hours': hours
+            'time_window_hours': hours,
         }

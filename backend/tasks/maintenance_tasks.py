@@ -40,7 +40,7 @@ def cleanup_old_data(self, retention_days: int = 90):
     async def _cleanup():
         from backend.models.reddit import RedditPost
         from backend.models.stock import StockPrice
-        from backend.models.prediction import TradingSignal
+        from backend.models.trading_signal import TradingSignal
         
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
         results = {
@@ -67,8 +67,8 @@ def cleanup_old_data(self, retention_days: int = 90):
                 # Delete old closed signals (keep active ones)
                 result = await db.execute(
                     delete(TradingSignal).where(
-                        TradingSignal.created_at < cutoff,
-                        TradingSignal.status.in_(["closed", "expired", "stopped"])
+                        TradingSignal.generated_at < cutoff,
+                        TradingSignal.is_active == 0,
                     )
                 )
                 results["signals_deleted"] = result.rowcount
@@ -116,7 +116,7 @@ def generate_system_report(self):
     async def _report():
         from backend.models.reddit import RedditPost
         from backend.models.stock import StockPrice
-        from backend.models.prediction import TradingSignal
+        from backend.models.trading_signal import TradingSignal
         
         report = {
             "generated_at": datetime.now(timezone.utc).isoformat(),

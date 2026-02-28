@@ -8,7 +8,7 @@ from backend.api.schemas.posts import (
 )
 from backend.api.middleware.rate_limit import check_rate_limit
 from backend.config.rate_limits import RATE_LIMITS, get_period_seconds
-from backend.scrapers.reddit_scraper import RedditScraper
+from backend.scrapers.reddit_json_scraper import RedditJsonScraper
 from backend.services.reddit_service import RedditService
 from backend.utils.logger import get_logger
 from pydantic import BaseModel
@@ -261,7 +261,7 @@ async def scrape_subreddit(
         logger.info(f"🔄 Starting scrape for r/{subreddit} (limit={limit})")
         
         # Step 1: Scrape from Reddit
-        scraper = RedditScraper()
+        scraper = RedditJsonScraper()
         posts = scraper.scrape_posts(subreddit, limit=limit)
         
         if not posts:

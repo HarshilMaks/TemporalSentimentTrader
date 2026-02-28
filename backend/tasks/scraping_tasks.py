@@ -59,7 +59,7 @@ def fetch_stocks_scheduled(self, tickers: List[str] = None):
             "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
             "NVDA", "META", "AMD", "NFLX", "DIS",
             "BABA", "INTC", "CSCO", "ADBE", "PYPL",
-            "CRM", "ORCL", "UBER", "SPOT", "SQ"
+            "CRM", "ORCL", "UBER", "SPOT", "COIN"
         ]
     
     async def _fetch():
