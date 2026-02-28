@@ -2,7 +2,7 @@
 # TFT Trader — Multi-stage Docker Build
 # ═════════════════════════════════════════════════════════════════════════════
 
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 # Install uv for faster package management (~10x faster than pip)
 RUN pip install uv
@@ -23,7 +23,7 @@ COPY requirements.txt ./
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Development Stage
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM base as development
+FROM base AS development
 
 # Install all dependencies
 RUN uv pip install --no-cache-dir -r requirements.txt
@@ -50,7 +50,7 @@ CMD ["python", "-m", "backend.api.main"]
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Production Stage
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FROM base as production
+FROM base AS production
 
 # Install only production dependencies using uv
 RUN uv pip install --no-cache-dir -r requirements.txt

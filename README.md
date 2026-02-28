@@ -1,193 +1,113 @@
-# Temporal Sentiment Trader
+# TFT Trader — Triangulation Swing Trading Platform
 
-**Algorithmic Swing Trading Platform with TFT Ensemble ML & Sentiment Analysis**
+**Legal insider trading (information arbitrage) swing trading platform using the Triangulation Method.**
 
-Temporal Sentiment Trader is a production-grade, full-stack trading system that combines Reddit sentiment analysis with temporal fusion transformer (TFT) ensemble models to generate algorithmic swing trading signals. The platform uses a multi-model ensemble (TFT, LSTM, XGBoost, LightGBM) with strict risk management to target 60-65% win rates on 3-7 day trades.
+BUY signals fire only when 3 independent data layers align: SEC Form 4 insider filings, institutional volume flow, and Reddit retail sentiment. An ML ensemble validates candidates, and a strict risk manager ensures profitability even at 45% win rate.
 
-**Project Status:** Active Development | Week 2 of 12  
-**Strategy:** Swing + Momentum Trading  
-**Tech Stack:** FastAPI, PostgreSQL, PyTorch, Next.js
-
----
-
-## Overview
-
-### Core Concept
-
-Capture short-term momentum opportunities by combining:
-- **Reddit sentiment analysis** (early detection of retail investor momentum)
-- **Technical indicators** (RSI, MACD, Bollinger Bands, moving averages)
-- **Temporal Fusion Transformer ensemble** (TFT + LSTM + XGBoost + LightGBM for temporal predictions)
-- **Automated risk management** (position sizing, stop-loss, confidence filtering)
-
-### Key Differentiators
-
-1. **Early Sentiment Detection** - Reddit signals momentum before mainstream news
-2. **TFT Ensemble Architecture** - Temporal Fusion Transformer + multi-model ensemble reduce overfitting
-3. **Risk-First Design** - Every signal validated by risk manager before execution
-4. **Production Architecture** - Async APIs, background tasks, proper observability
+**Status:** Backend complete, Frontend complete, Integration tested  
+**Strategy:** Triangulation swing trading (3-7 day holds)  
+**Tech Stack:** FastAPI · PostgreSQL · PyTorch · XGBoost · LightGBM · Next.js 16 · Celery
 
 ---
 
 ## Architecture
 
-### System Design
-
 ```
-Data Ingestion → Feature Engineering → ML Prediction → Risk Validation → Signal Generation
-      ↓                  ↓                   ↓                ↓                 ↓
-  PostgreSQL         Database           Ensemble         Risk Manager      Frontend
-   + Redis                              Models                            Dashboard
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DATA INGESTION (EOD)                        │
+│                                                                     │
+│  SEC EDGAR ──→ InsiderTracker ──→ insider_trades table              │
+│  yfinance  ──→ StockScraper   ──→ stock_prices table               │
+│  Reddit    ──→ RedditScraper  ──→ reddit_posts table                │
+└──────────────────────────┬──────────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────────┐
+│                    REGIME FILTER (Gate)                              │
+│                                                                     │
+│  SPY close > SMA200 → BULL (allow BUY)                              │
+│  SPY close < SMA200 → BEAR (block all BUY signals)                 │
+└──────────────────────────┬──────────────────────────────────────────┘
+                           │ BULL only
+┌──────────────────────────▼──────────────────────────────────────────┐
+│               TRIANGULATION SCORING (0-100)                         │
+│                                                                     │
+│  Insider Score  (0-30)  CEO/CFO buy = 30, Director = 20, cluster+5 │
+│  Flow Score     (0-20)  Volume ratio > 2.0 = 20, > 1.5 = 10       │
+│  Sentiment Score(0-20)  Reddit avg > 0.3 AND mentions > 20 = 20    │
+│  Technical Score(0-30)  RSI < 35 = 10, MACD cross = 10, >SMA50 =10│
+│                                                                     │
+│  Total ≥ 60 → candidate passes to ML validation                    │
+└──────────────────────────┬──────────────────────────────────────────┘
+                           │ score ≥ 60
+┌──────────────────────────▼──────────────────────────────────────────┐
+│                  ML ENSEMBLE VALIDATION                              │
+│                                                                     │
+│  XGBoost  (40%) ─┐                                                  │
+│  LightGBM (30%) ─┼→ Weighted vote → BUY + confidence ≥ 0.70       │
+│  TFT/LSTM (30%) ─┘                                                  │
+└──────────────────────────┬──────────────────────────────────────────┘
+                           │ BUY + conf ≥ 70%
+┌──────────────────────────▼──────────────────────────────────────────┐
+│                    RISK MANAGER                                      │
+│                                                                     │
+│  Stop: -5%  Target: +10%  R/R: 1:2                                  │
+│  Max position: 20%  Max risk/trade: 2%  Max 5 positions             │
+│  Portfolio drawdown limit: 15%                                       │
+└──────────────────────────┬──────────────────────────────────────────┘
+                           │ approved
+                    TradingSignal → DB → API → Dashboard
 ```
 
-**Data Layer**
-- Reddit scraper (PRAW) with custom VADER sentiment lexicon
-- Stock scraper (yfinance) with technical indicators
-- PostgreSQL for persistence, Redis for caching
+---
 
-**ML Layer**
-- LSTM (30%) - Sequence patterns over 30-day windows
-- XGBoost (40%) - Feature importance, most reliable
-- LightGBM (30%) - Fast inference
-- Ensemble voting with 70%+ confidence threshold
+## API Endpoints
 
-**Risk Layer**
-- Position sizing: Max 20% per position, 2% risk per trade
-- Stop-loss: Automatic -5% exit
-- Confidence filtering: Only trade signals >70% probability
-- Portfolio constraints: Max 5 concurrent positions, 15% drawdown limit
+### Signals (`/api/v1/signals`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/active` | Active trading signals |
+| GET | `/history?limit=50` | Closed signals with P&L |
+| GET | `/ticker/{ticker}` | Signals for specific ticker |
+| GET | `/daily-report` | Today's generated signals |
+| POST | `/{id}/close?exit_price=&exit_reason=` | Manually close a signal |
 
-**API Layer**
-- FastAPI with async operations
-- REST endpoints for historical data
-- WebSocket for real-time updates (future)
+### Predictions (`/api/v1/predictions`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/latest` | Latest ensemble prediction per ticker |
+| GET | `/ticker/{ticker}?limit=30` | Prediction history |
+| POST | `/run` | Trigger manual prediction run |
 
-### Technology Stack
+### Sentiment (`/api/v1/sentiment`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/trending?days=7&limit=20` | Top tickers by mentions + sentiment |
+| GET | `/ticker/{ticker}?days=30` | Daily sentiment aggregates |
+| GET | `/insider/{ticker}?days=90` | Insider trading activity (Form 4) |
 
-**Backend:** FastAPI, PostgreSQL, SQLAlchemy 2.0, Alembic, Celery, Redis  
+### Stocks (`/api/v1/stocks`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/prices/{ticker}` | Historical OHLCV + indicators |
+| POST | `/fetch/{ticker}` | Trigger stock data fetch |
+
+### Reddit (`/api/v1/posts`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Paginated Reddit posts |
+| GET | `/ticker/{ticker}` | Posts mentioning ticker |
+| GET | `/trending` | Most mentioned tickers |
+| GET | `/sentiment/{ticker}` | Aggregate sentiment |
+
+---
+
+## Tech Stack
+
+**Backend:** FastAPI, PostgreSQL (Neon), SQLAlchemy 2.0, Alembic, Celery, Redis  
 **ML:** PyTorch (LSTM), XGBoost, LightGBM, pandas-ta  
-**Data:** yfinance, PRAW, vaderSentiment  
-**Frontend:** Next.js 15, TypeScript, Tailwind, TradingView  
-**DevOps:** Docker, GitHub Actions, Railway/Render, Vercel
-
----
-
-## Features
-
-### Implemented (Week 1-2)
-
-**Reddit Sentiment Engine**
-- Multi-subreddit scraping (r/wallstreetbets, r/stocks, r/investing)
-- Custom VADER lexicon with 40+ stock market terms
-- Ticker extraction from post text
-- Sentiment scoring with engagement metrics
-
-**Stock Data Pipeline**
-- OHLCV data from Yahoo Finance
-- Technical indicators: RSI, MACD, Bollinger Bands, SMA 50/200, Volume Ratio
-- 3-month historical lookback for moving averages
-- Async scraping with error handling
-
-**REST API**
-- `GET /posts/` - Paginated Reddit posts with sentiment
-- `GET /posts/ticker/{ticker}` - Filter posts by stock symbol
-- `GET /posts/trending` - Most mentioned tickers
-- `GET /posts/sentiment/{ticker}` - Aggregate sentiment metrics
-- `GET /health` - Database connectivity check
-
-**Database Schema**
-- `reddit_posts` - Sentiment, tickers, engagement
-- `stock_prices` - OHLCV + momentum indicators
-- `trading_signals` - BUY/SELL/HOLD with risk parameters
-
-### Planned (Week 3-12)
-
-**Week 3-4: ML Pipeline**
-- Feature engineering (45 features combining price + sentiment)
-- LSTM training on sequence data
-- XGBoost/LightGBM training on feature vectors
-- Ensemble voting system
-- Backtesting framework on 3-year historical data
-
-**Week 5-6: Trading Logic**
-- Risk manager implementation
-- Signal generation with entry/exit logic
-- Position sizing calculator
-- Stop-loss/target automation
-- Performance tracking
-
-**Week 7-10: Frontend**
-- Dashboard with trending stocks
-- TradingView price charts
-- Sentiment timeline visualization
-- Active signals display
-- Portfolio tracking (P&L, win rate)
-- WebSocket real-time updates
-
-**Week 11-12: Production**
-- Docker containerization
-- CI/CD pipeline
-- Error monitoring (Sentry)
-- Deployment to Railway + Vercel
-
----
-
-## Trading Strategy
-
-### Entry Criteria (BUY Signal)
-
-All conditions must align:
-
-**Technical Momentum**
-- RSI < 35 (oversold with reversal potential)
-- MACD > Signal (bullish crossover)
-- Close > SMA 50 (price above support)
-- Volume > 1.5x average (momentum confirmation)
-
-**Sentiment Momentum**
-- Sentiment score > 0.3 (positive Reddit sentiment)
-- Sentiment rising over 5-day period
-- Mention count > 20 posts (high conviction)
-
-**ML Validation**
-- Ensemble prediction = BUY
-- Confidence > 70%
-- All 3 models agree or strong majority
-
-**Risk Checks**
-- Current positions < 5
-- Portfolio drawdown < 15%
-- Risk/reward ratio > 1:2
-
-### Exit Criteria
-
-1. **Take Profit** - Price hits +7% target
-2. **Stop Loss** - Price hits -5% stop
-3. **Signal Flip** - Technical or sentiment reversal
-4. **Time Decay** - Position held > 7 days
-
-### Risk Management
-
-**Position Sizing Formula:**
-```python
-risk_amount = portfolio * 0.02  # Max 2% risk per trade
-position_size = risk_amount / stop_loss_distance
-position_size = min(position_size, portfolio * 0.20)  # Cap at 20%
-```
-
-**Risk Limits:**
-- Max position: 20% of portfolio
-- Max risk per trade: 2%
-- Stop loss: 5% below entry
-- Max concurrent positions: 5
-- Portfolio drawdown limit: 15%
-
-**Expected Performance:**
-- Win rate: 60-65%
-- Average gain: 5-10% per trade
-- Average loss: <5%
-- Risk/reward: 1:2 minimum
-- Trade frequency: 2-5 per week
+**Data:** yfinance, PRAW, SEC EDGAR (Form 4 XML), vaderSentiment  
+**Frontend:** Next.js 16, TypeScript, Tailwind CSS v4, Recharts, TradingView lightweight-charts  
+**Infra:** Docker, Celery Beat scheduler
 
 ---
 
@@ -196,42 +116,56 @@ position_size = min(position_size, portfolio * 0.20)  # Cap at 20%
 ```
 tft-trader/
 ├── backend/
-│   ├── api/                  # FastAPI application
-│   │   ├── main.py           # Entry point
-│   │   ├── routes/           # Endpoint definitions
-│   │   └── schemas/          # Pydantic models
-│   ├── models/               # SQLAlchemy ORM models
-│   │   ├── reddit.py
-│   │   ├── stock.py
-│   │   └── trading_signal.py
-│   ├── scrapers/             # Data collection
-│   │   ├── reddit_scraper.py
-│   │   └── stock_scraper.py
-│   ├── services/             # Business logic
-│   │   ├── reddit_service.py
-│   │   └── stock_service.py
-│   ├── ml/                   # Machine learning
-│   │   ├── models/           # Model architectures
-│   │   ├── training/         # Training scripts
-│   │   └── inference/        # Prediction service
-│   ├── utils/                # Utilities
-│   │   ├── sentiment.py      # VADER analyzer
-│   │   └── logger.py
-│   ├── config/               # Configuration
-│   └── database/             # DB setup
-├── frontend/                 # Next.js application
+│   ├── api/
+│   │   ├── main.py                 # FastAPI app + router registration
+│   │   ├── routes/
+│   │   │   ├── signals.py          # Trading signals CRUD
+│   │   │   ├── predictions.py      # ML predictions
+│   │   │   ├── sentiment.py        # Sentiment + insider data
+│   │   │   ├── stocks.py           # Stock prices + fetch
+│   │   │   └── posts.py            # Reddit posts
+│   │   └── middleware/
+│   │       └── rate_limit.py       # IP-based rate limiting
+│   ├── models/                     # SQLAlchemy ORM
+│   │   ├── trading_signal.py       # BUY/SELL/HOLD signals
+│   │   ├── prediction.py           # ML ensemble predictions
+│   │   ├── insider_trade.py        # SEC Form 4 filings
+│   │   ├── stock.py                # OHLCV + indicators
+│   │   ├── reddit.py               # Reddit posts + sentiment
+│   │   └── feature_snapshot.py     # Feature engineering snapshots
+│   ├── strategy/                   # Triangulation engine
+│   │   ├── signal_engine.py        # Score → ML → Risk → Signal
+│   │   ├── regime_filter.py        # SPY vs SMA200 bull/bear
+│   │   └── insider_tracker.py      # SEC EDGAR Form 4 scraper
+│   ├── ml/
+│   │   ├── models/                 # XGBoost, LightGBM, TFT/LSTM, Ensemble
+│   │   ├── inference/predictor.py  # Batch/single prediction
+│   │   ├── features/build.py       # Feature engineering (25-d vector)
+│   │   └── training/               # Training scripts
+│   ├── services/
+│   │   ├── risk_manager.py         # 5-rule risk validation
+│   │   ├── ml_service.py           # ML orchestrator
+│   │   └── stock_service.py        # Stock data service
+│   ├── scrapers/
+│   │   ├── stock_scraper.py        # yfinance + pandas_ta
+│   │   └── reddit_scraper.py       # PRAW + VADER sentiment
+│   ├── tasks/                      # Celery background tasks
+│   │   ├── ml_tasks.py             # Signal generation (uses SignalEngine)
+│   │   ├── insider_tasks.py        # SEC Form 4 ingestion
+│   │   ├── scraping_tasks.py       # Reddit + stock scraping
+│   │   └── maintenance_tasks.py    # Cleanup + reports
+│   └── celery_app.py               # Beat schedule + task routing
+├── frontend/                       # Next.js 16 dashboard
 │   ├── app/
-│   ├── components/
-│   └── lib/
-├── tests/                    # Tests
-├── scripts/                  # Utility scripts
-├── docs/                     # Documentation
-│   ├── ARCHITECTURE.md
-│   └── TRADING_STRATEGY.md
-├── alembic/                  # Migrations
-├── docker-compose.yml
-├── pyproject.toml
-└── README.md
+│   │   ├── page.tsx                # Dashboard (watchlist + signals + trending)
+│   │   ├── signals/page.tsx        # Signals (active/daily/history tabs)
+│   │   └── ticker/[symbol]/page.tsx# Ticker detail (chart + ML + insider)
+│   ├── components/                 # Reusable UI components
+│   └── lib/api.ts                  # Typed API client
+├── alembic/                        # 11 migrations
+├── docker-compose.yml              # Celery worker + beat + Flower
+├── Dockerfile                      # Multi-stage (dev + prod)
+└── docs/                           # Architecture + strategy docs
 ```
 
 ---
@@ -239,285 +173,71 @@ tft-trader/
 ## Getting Started
 
 ### Prerequisites
-
-- Python 3.12+
-- PostgreSQL 14+ (or Neon Cloud account for free tier)
-- Node.js 20+
-- Docker & Docker Compose (for local PostgreSQL + Redis)
+- Python 3.12+, Node.js 20+, Docker
+- PostgreSQL (Neon free tier) + Redis (Redis Cloud free tier)
 - UV package manager (`pip install uv`)
 
-### Quick Setup (Recommended)
-
+### Backend
 ```bash
-# Clone repository
-git clone <your-repo-url>
-cd tft-trader
-
-# Run automated setup script
-bash scripts/setup.sh
-
-# Follow prompts to configure credentials
+cp .env.example .env          # Fill in credentials
+uv sync                       # Install dependencies
+uv run alembic upgrade head   # Run migrations
+uv run uvicorn backend.api.main:app --reload  # Start API on :8000
 ```
 
-The setup script will:
-- ✅ Create `.env` from template
-- ✅ Install Python dependencies
-- ✅ Start PostgreSQL + Redis with Docker
-- ✅ Run database migrations
-- ✅ Provide next steps
-
-### Manual Backend Setup
-
-```bash
-# Clone repository
-git clone <your-repo-url>
-cd tft-trader
-
-# Install dependencies
-uv sync
-
-# Configure environment (see docs/credentials.md for detailed guide)
-cp .env.example .env
-# Edit .env with your credentials
-
-# Run migrations
-uv run alembic upgrade head
-
-# Start Celery worker (separate terminal)
-celery -A backend.celery_app worker --loglevel=info
-
-# Start API server
-uv run uvicorn backend.api.main:app --reload
-```
-
-**API available at:** http://localhost:8000  
-**API Docs:** http://localhost:8000/docs  
-**ReDoc:** http://localhost:8000/redoc
-
-### Environment Configuration
-
-> **📖 Full guide:** See [`docs/credentials.md`](docs/credentials.md) for detailed setup instructions for each credential.
-
-#### Required Credentials
-
-```env
-# PostgreSQL Database (local or cloud)
-DATABASE_URL=postgresql://user:pass@localhost:5432/stockmarket
-
-# Redis (local or cloud)
-REDIS_URL=redis://localhost:6379/0
-
-# Reddit API (get from reddit.com/prefs/apps)
-REDDIT_CLIENT_ID=your_reddit_client_id
-REDDIT_CLIENT_SECRET=your_reddit_client_secret
-REDDIT_USER_AGENT=TFT-Trader/1.0 (by your_username)
-
-# Security
-SECRET_KEY=generate_with_secrets.token_urlsafe(32)
-```
-
-#### Optional Credentials
-
-```env
-# Error tracking
-SENTRY_DSN=https://key@sentry.io/project_id
-
-# Monitoring
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-```
-
-**Full reference:** See [`.env.example`](.env.example) with inline documentation
-
-### Frontend Setup (Coming in Week 7)
-
+### Frontend
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev                   # Start on :3000 (proxies to :8000)
 ```
 
-**Dashboard at:** http://localhost:3000
-
-### Testing
-
+### Celery (Background Tasks)
 ```bash
-# Test stock scraper
-uv run python test_stock_scraper.py
+# Worker
+celery -A backend.celery_app worker --loglevel=info --queues=scraping,ml
 
-# Run unit tests
-uv run pytest tests/unit/
+# Beat scheduler
+celery -A backend.celery_app beat --loglevel=info
+```
 
-# Run integration tests
-uv run pytest tests/integration/
+### Docker (All Services)
+```bash
+docker-compose up -d          # Starts worker + beat + Flower
+# API: http://localhost:8000
+# Flower: http://localhost:5555
 ```
 
 ---
 
-## Development Roadmap
+## Celery Beat Schedule
 
-**Week 1-2: Foundation** ✅
-- PostgreSQL setup, Reddit scraper, stock data pipeline, REST API
-
-**Week 3-4: ML Training**
-- Feature engineering, LSTM training, XGBoost/LightGBM, backtesting
-
-**Week 5-6: Trading Logic**
-- Risk manager, signal generation, position sizing, performance tracking
-
-**Week 7-10: Frontend**
-- Dashboard, charts, sentiment timeline, real-time updates
-
-**Week 11-12: Production**
-- Docker, CI/CD, monitoring, deployment
+| Time (UTC) | Task | Queue |
+|------------|------|-------|
+| Every 30 min | Scrape Reddit | scraping |
+| Every hour | Fetch stock data | scraping |
+| 10:00 PM | Ingest SEC Form 4 insider trades | scraping |
+| 10:30 PM | Generate trading signals (triangulation) | ml |
+| Every 5 min | Monitor active signals (target/stop/expiry) | ml |
 
 ---
 
-## Success Metrics
+## Risk Math
 
-**Technical Performance**
-- API response time: <200ms
-- Database query time: <50ms
-- Scraper throughput: 100 posts/min
-- System uptime: 99.9%
+```
+Win rate: 45%    Avg win: +10%    Avg loss: -5%
+Expected value per trade = (0.45 × 10) - (0.55 × 5) = 4.5 - 2.75 = +1.75%
 
-**ML Performance** (Target on validation set)
-- Prediction accuracy: 65%+
-- Sharpe ratio: >1.5
-- Max drawdown: <15%
-- Win rate: 60-65%
-
-**Trading Performance** (Simulated)
-- Average trade duration: 3-7 days
-- Risk/reward: >1:2
-- ROI: 20-30% annually (target)
-- Consistency: Positive 8/12 months
-
----
-
-## Tech Stack Details
-
-**Backend Stack:**
-- **FastAPI 0.128.0** - Async REST API with auto docs
-- **SQLAlchemy 2.0.23** - Async ORM with type safety
-- **Alembic 1.12.1** - Database migrations
-- **PostgreSQL** - Primary data store (hosted on Neon)
-- **Celery 5.3.4 + Redis** - Task queue for async scraping
-
-**ML Stack:**
-- **PyTorch 2.1.1** - LSTM for sequence modeling
-- **XGBoost 2.0.2** - Gradient boosting for tabular features
-- **LightGBM 4.1.0** - Fast gradient boosting
-- **pandas-ta 0.4.71b0** - Technical indicator calculations
-- **scikit-learn** - Preprocessing, metrics, model selection
-
-**Data Sources:**
-- **yfinance 1.0** - Stock OHLCV data from Yahoo Finance
-- **PRAW 7.7.1** - Reddit API wrapper
-- **vaderSentiment 3.3.2** - Sentiment analysis with custom lexicon
-
----
-
-## Project Structure Philosophy
-
-This codebase follows clean architecture principles:
-
-**Separation of Concerns:**
-- `api/` - HTTP layer (routes, schemas, middleware)
-- `services/` - Business logic
-- `models/` - Database models
-- `ml/` - Machine learning pipeline
-- `scrapers/` - Data ingestion
-
-**Async-First:**
-- All I/O operations use `async/await`
-- Database sessions via `AsyncSession`
-- Scraping parallelized with `asyncio.gather()`
-
-**Type Safety:**
-- Pydantic schemas for API validation
-- SQLAlchemy 2.0 typed mappings
-- Full type hints in Python code
-
-**Testing:**
-- Unit tests for utilities and services
-- Integration tests for API endpoints
-- Mocked external dependencies
-
----
-
-## Learning Outcomes
-
-**Backend Engineering:**
-- Async Python with FastAPI
-- PostgreSQL optimization (indexes, query planning)
-- Database migrations with Alembic
-- Task queues with Celery
-
-**Machine Learning:**
-- Time series forecasting with LSTM
-- Ensemble methods (stacking, voting)
-- Feature engineering for financial data
-- Backtesting and walk-forward validation
-
-**Trading Systems:**
-- Risk management and position sizing
-- Entry/exit signal generation
-- Performance metrics (Sharpe, Sortino, max drawdown)
-- Market regime detection
-
-**Full Stack:**
-- REST API design
-- WebSocket real-time updates
-- React Server Components (Next.js 15)
-- Docker containerization
-- CI/CD with GitHub Actions
-
----
-
-## Contributing
-
-This is a personal learning project. If you find issues or have suggestions:
-
-1. Open an issue describing the problem
-2. Fork the repo and create a feature branch
-3. Submit a PR with clear description
-
----
-
-## License
-
-MIT License - see LICENSE file
-
----
-
-## Acknowledgments
-
-**Data Sources:**
-- Yahoo Finance (via yfinance)
-- Reddit API
-- Financial modeling inspiration from QuantConnect, Zipline
-
-**ML References:**
-- PyTorch documentation
-- XGBoost and LightGBM papers
-- Andrew Ng's ML courses
-
----
-
-## Intended Audience
-
-* Backend engineering roles (Python, FastAPI, distributed systems)
-* ML engineering roles (training, inference, pipelines)
-* Full-stack roles with real-time data requirements
-* Interview take-home or portfolio review
+100 trades × 1.75% edge = +175% cumulative return
+Even at 45% accuracy, the system is profitable due to 1:2 R/R.
+```
 
 ---
 
 ## Disclaimer
 
-This project is for **educational and research purposes only**.
-It is not financial advice and should not be used for live trading without extensive validation, risk controls, and regulatory compliance.
+This project is for **educational and research purposes only**. Not financial advice. Do not use for live trading without extensive validation and regulatory compliance.
 
 ---
 
-**Built with ❤️ as a learning project to master ML engineering and quantitative trading**
+**Built as a learning project for ML engineering + quantitative trading systems.**

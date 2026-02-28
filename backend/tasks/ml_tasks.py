@@ -6,26 +6,32 @@ from backend.utils.logger import logger
 
 @app.task(name="backend.tasks.ml_tasks.generate_daily_signals", bind=True)
 def generate_daily_signals(self):
+    """Generate trading signals via Triangulation: Regime → Score → ML → Risk.
+
+    Runs daily at 5:30 PM ET (after insider ingestion at 5:00 PM ET).
     """
-    Generate trading signals for all watchlist stocks.
-    Runs daily at market open (9:30 AM EST).
-    
-    NOTE: This is a placeholder until Week 4 when ML models are trained.
-    """
-    logger.info("Signal generation task triggered (Week 4 implementation pending)")
-    
-    # TODO Week 4: Implement actual signal generation
-    # 1. Fetch latest stock data and sentiment
-    # 2. Run feature engineering
-    # 3. Run ensemble model (LSTM + XGBoost + LightGBM)
-    # 4. Generate signals with confidence > 0.7
-    # 5. Save to trading_signals table
-    
-    return {
-        "status": "pending",
-        "task_id": self.request.id,
-        "message": "ML models not yet trained (Week 4)"
-    }
+    import asyncio
+
+    async def _generate():
+        from backend.strategy.signal_engine import SignalEngine
+
+        engine = SignalEngine()
+        signals = await engine.generate_signals()
+
+        if not signals:
+            logger.info("No signals generated")
+            return {"status": "success", "signals": 0}
+
+        # Persist approved signals
+        async with AsyncSessionLocal() as session:
+            for sig in signals:
+                session.add(sig)
+            await session.commit()
+            logger.info(f"Persisted {len(signals)} trading signals")
+
+        return {"status": "success", "signals": len(signals)}
+
+    return asyncio.run(_generate())
 
 
 @app.task(name="backend.tasks.ml_tasks.monitor_active_signals", bind=True)

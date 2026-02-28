@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Import models
 from backend.models.stock import StockPrice
 from backend.models.reddit import RedditPost
+from backend.models.insider_trade import InsiderTrade
 from backend.database.config import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,10 @@ class FeatureBuilder:
                 session, tickers, reference_date
             )
 
+            insider_data = await self._fetch_insider_data(
+                session, tickers, reference_date
+            )
+
             # Build features per ticker
             features = {}
             for ticker in tickers:
@@ -133,7 +138,8 @@ class FeatureBuilder:
                         ticker=ticker,
                         stock_history=stock_data.get(ticker, pd.DataFrame()),
                         sentiment_scores=sentiment_data.get(ticker, []),
-                        reference_date=reference_date
+                        reference_date=reference_date,
+                        insider_trades=insider_data.get(ticker, []),
                     )
                     features[ticker] = ticker_features
                 except Exception as e:
@@ -272,12 +278,38 @@ class FeatureBuilder:
 
         return sentiment_data
 
+    async def _fetch_insider_data(
+        self,
+        session: AsyncSession,
+        tickers: List[str],
+        reference_date: datetime,
+    ) -> Dict[str, List]:
+        """Fetch insider trades for each ticker within 30-day window."""
+        cutoff_30d = (reference_date - timedelta(days=30)).date()
+        cutoff_7d = (reference_date - timedelta(days=7)).date()
+
+        stmt = select(InsiderTrade).where(
+            and_(
+                InsiderTrade.ticker.in_(tickers),
+                InsiderTrade.transaction_date >= cutoff_30d,
+                InsiderTrade.transaction_type == "BUY",
+            )
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+        insider_data: Dict[str, List] = {t: [] for t in tickers}
+        for row in rows:
+            insider_data.setdefault(row.ticker, []).append(row)
+        return insider_data
+
     def _compute_features(
         self,
         ticker: str,
         stock_history: pd.DataFrame,
         sentiment_scores: List[float],
-        reference_date: datetime
+        reference_date: datetime,
+        insider_trades: Optional[List] = None,
     ) -> Dict:
         """
         Compute all engineered features for a ticker.
@@ -298,6 +330,7 @@ class FeatureBuilder:
 
         if stock_history.empty:
             features["data_quality"] = "insufficient_data"
+            features.update(self._compute_insider_features(insider_trades or [], reference_date))
             logger.warning(f"No stock data for {ticker}")
             return features
 
@@ -327,6 +360,9 @@ class FeatureBuilder:
 
         # Volume Features
         features["volume_trend"] = self._compute_volume_trend(stock_history)
+
+        # Insider Features
+        features.update(self._compute_insider_features(insider_trades or [], reference_date))
 
         # Data Quality
         features["data_quality"] = "complete" if not features.get("data_quality") else "incomplete"
@@ -439,6 +475,28 @@ class FeatureBuilder:
         except Exception as e:
             logger.warning(f"Error computing volume trend: {e}")
             return None
+
+    def _compute_insider_features(self, trades: List, reference_date: datetime) -> Dict:
+        """Compute insider trading features: buy volume, count, and flag."""
+        cutoff_7d = (reference_date - timedelta(days=7)).date()
+
+        buy_volume_7d = 0.0
+        buy_count_7d = 0
+        has_buy = 0
+
+        for t in trades:
+            has_buy = 1
+            txn_date = t.transaction_date if hasattr(t, "transaction_date") else t.get("transaction_date")
+            dollar_val = (t.dollar_value if hasattr(t, "dollar_value") else t.get("dollar_value")) or 0.0
+            if txn_date >= cutoff_7d:
+                buy_volume_7d += dollar_val
+                buy_count_7d += 1
+
+        return {
+            "insider_buy_volume_7d": buy_volume_7d,
+            "insider_buy_count_7d": buy_count_7d,
+            "has_insider_buy": has_buy,
+        }
 
     @staticmethod
     def _safe_float(value) -> Optional[float]:

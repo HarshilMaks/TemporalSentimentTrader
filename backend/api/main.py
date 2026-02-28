@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from backend.api.routes import posts, stocks
+from backend.api.routes import posts, stocks, signals, predictions, sentiment
 from backend.config.settings import settings
 from backend.cache.redis_client import get_redis, close_redis
 from fastapi.responses import JSONResponse
@@ -100,6 +100,9 @@ app.add_middleware(
 API_PREFIX = "/api/v1"
 app.include_router(posts.router, prefix=API_PREFIX)
 app.include_router(stocks.router, prefix=API_PREFIX)
+app.include_router(signals.router, prefix=API_PREFIX)
+app.include_router(predictions.router, prefix=API_PREFIX)
+app.include_router(sentiment.router, prefix=API_PREFIX)
 
 @app.get("/")
 async def root():

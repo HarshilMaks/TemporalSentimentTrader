@@ -1,13 +1,38 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Optional, Literal
+import os
 import asyncio
 from backend.models.reddit import RedditPost
-from backend.scrapers.reddit_scraper import RedditScraper, PostType
 from backend.utils.ticker_extractor import extract_tickers
 from backend.utils.sentiment import analyze_sentiment
 from backend.utils.logger import logger
 from backend.services.quality_scorer import QualityScorer
+
+# Use real Reddit API if credentials exist and work, otherwise fall back to mock
+_has_creds = False
+try:
+    from backend.scrapers.reddit_scraper import RedditScraper, PostType
+    _cid = os.getenv("REDDIT_CLIENT_ID", "")
+    _csec = os.getenv("REDDIT_CLIENT_SECRET", "")
+    if _cid and _csec and _cid != "your_14_char_client_id":
+        # Quick auth check — PRAW is lazy, force a request
+        import praw  # type: ignore
+        _r = praw.Reddit(
+            client_id=_cid,
+            client_secret=_csec,
+            user_agent=os.getenv("REDDIT_USER_AGENT", "TFTTrader/1.0"),
+        )
+        _r.user.me()  # triggers actual auth; returns None for script apps = OK
+        _has_creds = True
+except Exception:
+    pass
+
+if not _has_creds:
+    from backend.scrapers.mock_reddit import MockRedditScraper as RedditScraper  # type: ignore[assignment,no-redef]
+    logger.warning("Reddit API unavailable — using MockRedditScraper")
+
+PostType = Literal['hot', 'new', 'rising', 'top']
 
 
 class RedditService:
@@ -15,6 +40,9 @@ class RedditService:
     Service layer for Reddit data operations.
     Handles business logic: scraping → extraction → storage.
     Targets: r/wallstreetbets, r/stocks, r/options
+
+    Falls back to MockRedditScraper when REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET
+    are not set, so the full pipeline works without Reddit API approval.
     """
     
     # Target subreddits for stock discussion
@@ -24,6 +52,7 @@ class RedditService:
         self.scraper = RedditScraper()
         self.quality_scorer = QualityScorer(min_quality=min_quality)
         self.min_quality = min_quality
+        self.using_mock = not _has_creds
     
     async def scrape_and_save(
         self, 

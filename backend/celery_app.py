@@ -21,6 +21,7 @@ app = Celery(
         "backend.tasks.scraping_tasks",
         "backend.tasks.ml_tasks",
         "backend.tasks.maintenance_tasks",
+        "backend.tasks.insider_tasks",
     ]
 )
 
@@ -58,7 +59,13 @@ app.conf.update(
 
 # Scheduled tasks (Beat schedule)
 app.conf.beat_schedule = {
-    # Scrape Reddit every 30 minutes during market hours
+    # Ingest SEC Form 4 insider trades daily at 5 PM ET (10 PM UTC)
+    "ingest-insider-trades": {
+        "task": "backend.tasks.insider_tasks.ingest_insider_trades",
+        "schedule": crontab(hour=22, minute=0),
+        "options": {"queue": "scraping"},
+    },
+
     "scrape-reddit-posts": {
         "task": "backend.tasks.scraping_tasks.scrape_reddit_scheduled",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
@@ -72,10 +79,10 @@ app.conf.beat_schedule = {
         "options": {"queue": "scraping"},
     },
     
-    # Generate trading signals daily at market open (9:30 AM EST = 2:30 PM UTC)
+    # Generate trading signals daily at 5:30 PM ET (10:30 PM UTC), after insider ingestion
     "generate-signals": {
         "task": "backend.tasks.ml_tasks.generate_daily_signals",
-        "schedule": crontab(hour=14, minute=30),  # 2:30 PM UTC
+        "schedule": crontab(hour=22, minute=30),  # 10:30 PM UTC = 5:30 PM ET
         "options": {"queue": "ml"},
     },
     

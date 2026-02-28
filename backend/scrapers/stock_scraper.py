@@ -53,8 +53,13 @@ class StockScraper:
                 # Bollinger Bands (volatility breakouts)
                 bbands = ta.bbands(df['Close'], length=20, std=2)
                 if bbands is not None:
-                    df['BB_Upper'] = bbands['BBU_20_2.0']
-                    df['BB_Lower'] = bbands['BBL_20_2.0']
+                    # pandas_ta column names vary by version — find them dynamically
+                    bbu_col = [c for c in bbands.columns if c.startswith('BBU')]
+                    bbl_col = [c for c in bbands.columns if c.startswith('BBL')]
+                    if bbu_col:
+                        df['BB_Upper'] = bbands[bbu_col[0]]
+                    if bbl_col:
+                        df['BB_Lower'] = bbands[bbl_col[0]]
                 
                 # Moving Averages (swing trading key levels)
                 df['SMA_50'] = ta.sma(df['Close'], length=50)
